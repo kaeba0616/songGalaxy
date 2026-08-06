@@ -16,10 +16,5 @@
 | 환경변수 접근 | `.env` → `src/config/env.ts` | — | `process.env` 직접 접근 금지 (예외: `drizzle.config.ts`, 파일 내 주석 참조) |
 | 유저 취향 원본 | `likes` 테이블 | `user_stars`(파생 캐시) | 무효화: 좋아요 변경 시 즉시 재계산 |
 | 곡 데이터 원천 | HuggingFace `maharshipandya/spotify-tracks-dataset` → `scripts/ingest-dataset.ts` | `songs` 테이블 (3만 곡) | 멱등: `(source, source_id)` 유니크 |
-
-## 예정된 원본 (구현 시 실제 경로로 갱신)
-
-| 지식의 종류 | 원본 위치(예정) | 파생물 | 비고 |
-| --- | --- | --- | --- |
-| 장르→성단 매핑 | 테마 배치 스크립트 내 명시적 상수 | themes 테이블 | 이슈 #3 |
-| 곡 좌표 | `songs.pos_x/y/z` (배치가 1회 기록) | 렌더러 페이로드 | 기록 후 불변 |
+| 장르→성단 매핑 | `src/config/genre-clusters.ts` | `themes` 테이블 (`scripts/build-themes.ts`가 생성) | 성단 12개·색상 포함. 매핑 변경은 신규 곡에만 적용 |
+| 곡 좌표 | `songs.pos_x/y/z` (`scripts/layout-songs.ts`가 1회 기록) | 렌더러 페이로드 | 기록 후 불변. NULL인 곡만 채움. 배치 수학: `scripts/lib/layout-math.ts` |
