@@ -11,14 +11,15 @@
 | 제품 스펙·확정 결정(D1~D13) | [에픽 이슈 #1](https://github.com/kaeba0616/songGalaxy/issues/1) | 하위 이슈 #2~#8 | 스펙 본문을 다른 문서에 복제하지 말 것 |
 | 작업 단위·순서·완료 기준 | 이슈 #2~#8 | — | 각 이슈의 Acceptance Criteria가 완료 정의 |
 | 개발 프로세스 규칙 | `.claude/skills/ssot/SKILL.md`, `.claude/skills/commit-with-prompts/SKILL.md` | — | |
+| DB 스키마 | `src/db/schema.ts` (Drizzle) | 마이그레이션(`drizzle-kit push`), TS 타입(`$inferSelect`) | SQL·타입 수기 중복 정의 금지 |
+| 앱 상수 | `src/config/constants.ts` | — | `MIN_LIKES_FOR_STAR=5`, `BIG_THEME_COUNT=12`, `GALAXY_SONG_COUNT=30000` 등 |
+| 환경변수 접근 | `.env` → `src/config/env.ts` | — | `process.env` 직접 접근 금지 (예외: `drizzle.config.ts`, 파일 내 주석 참조) |
+| 유저 취향 원본 | `likes` 테이블 | `user_stars`(파생 캐시) | 무효화: 좋아요 변경 시 즉시 재계산 |
+| 곡 데이터 원천 | HuggingFace `maharshipandya/spotify-tracks-dataset` → `scripts/ingest-dataset.ts` | `songs` 테이블 (3만 곡) | 멱등: `(source, source_id)` 유니크 |
 
 ## 예정된 원본 (구현 시 실제 경로로 갱신)
 
 | 지식의 종류 | 원본 위치(예정) | 파생물 | 비고 |
 | --- | --- | --- | --- |
-| DB 스키마 | `src/db/schema.ts` (Drizzle) | 마이그레이션, TS 타입 | SQL·타입 수기 중복 정의 금지 |
-| 앱 상수 | `src/config/constants.ts` | — | `MIN_LIKES_FOR_STAR=5`, `BIG_THEME_COUNT=12`, `GALAXY_SONG_COUNT=30000` |
 | 장르→성단 매핑 | 테마 배치 스크립트 내 명시적 상수 | themes 테이블 | 이슈 #3 |
 | 곡 좌표 | `songs.pos_x/y/z` (배치가 1회 기록) | 렌더러 페이로드 | 기록 후 불변 |
-| 유저 취향 원본 | `likes` 테이블 | `user_stars`(파생 캐시) | 무효화: 좋아요 변경 시 즉시 재계산 |
-| 환경변수 | `.env` → 단일 config 모듈 | — | `process.env` 직접 접근 금지 |

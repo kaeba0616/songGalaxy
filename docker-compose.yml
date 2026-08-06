@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: songgalaxy-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: songgalaxy
+    ports:
+      - "5433:5432"
+    volumes:
+      - songgalaxy-pgdata:/var/lib/postgresql/data
+
+volumes:
+  songgalaxy-pgdata:
