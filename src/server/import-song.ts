@@ -1,8 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { itunesGenreToGenre } from "@/config/genre-clusters";
-import { GALAXY_RADIUS } from "@/config/constants";
-import { hashString, mulberry32 } from "@/lib/layout-math";
+import { placeInGenre } from "./place-song";
 
 /** 검색 즉석 편입 배치 식별자 — 롤백 시 이 값으로 삭제 (docs/SSOT.md) */
 const USER_IMPORT_BATCH = "user-import";
@@ -97,31 +96,11 @@ export async function importFromItunes(itunesId: number): Promise<number | null>
   if (!track?.trackId || !track.trackName || !track.artistName) return null;
 
   const genre = itunesGenreToGenre(track.primaryGenreName ?? "");
-  let [subTheme] = await db
-    .select()
-    .from(schema.themes)
-    .where(and(eq(schema.themes.level, 2), eq(schema.themes.name, genre)));
-  if (!subTheme) {
-    [subTheme] = await db
-      .select()
-      .from(schema.themes)
-      .where(and(eq(schema.themes.level, 2), eq(schema.themes.name, "pop")));
-  }
-  if (!subTheme) return null;
-
-  // 세부 테마 구 안에 시드 랜덤 좌표 (구 내부 균일 분포), 은하 반지름 클램프
-  const rng = mulberry32(hashString(`${SOURCE}:${sourceId}`));
-  const theta = rng() * Math.PI * 2;
-  const phi = Math.acos(2 * rng() - 1);
-  const r = (subTheme.radius ?? 40) * 0.85 * Math.cbrt(rng());
-  let x = (subTheme.posX ?? 0) + r * Math.sin(phi) * Math.cos(theta);
-  let y = (subTheme.posY ?? 0) + r * Math.sin(phi) * Math.sin(theta);
-  let z = (subTheme.posZ ?? 0) + r * Math.cos(phi);
-  const dist = Math.hypot(x, y, z);
-  if (dist > GALAXY_RADIUS) {
-    const s = GALAXY_RADIUS / dist;
-    x *= s; y *= s; z *= s;
-  }
+  const placement =
+    (await placeInGenre(genre, `${SOURCE}:${sourceId}`)) ??
+    (await placeInGenre("pop", `${SOURCE}:${sourceId}`));
+  if (!placement) return null;
+  const { themeId, x, y, z } = placement;
 
   const [inserted] = await db
     .insert(schema.songs)
@@ -133,7 +112,7 @@ export async function importFromItunes(itunesId: number): Promise<number | null>
       source: SOURCE,
       sourceId,
       genre,
-      themeId: subTheme.id,
+      themeId,
       posX: x,
       posY: y,
       posZ: z,

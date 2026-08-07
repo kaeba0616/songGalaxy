@@ -17,6 +17,8 @@
 | 유저 취향 원본 | `likes` 테이블 | `user_stars`(파생 캐시) | 무효화: 좋아요 변경 시 즉시 재계산 |
 | 곡 데이터 원천(기본) | HuggingFace `maharshipandya/spotify-tracks-dataset` → `scripts/ingest-dataset.ts` | `songs` 테이블 (3만 곡, source=`spotify-tracks-114k`) | 멱등: `(source, source_id)` 유니크. 2022-10 스냅샷 |
 | 곡 데이터 원천(즉석 편입) | 외부 iTunes Search API → `src/server/import-song.ts` | `songs` 테이블 (source=`itunes`, batch=`user-import`) | /songs 검색에서 유저 트리거. iTunes 장르 매핑: `genre-clusters.ts`의 `ITUNES_GENRE_TO_GENRE` |
+| 곡 데이터 원천(주간 신곡) | 외부 MusicBrainz API → `scripts/ingest-new-releases.ts` | `songs` 테이블 (source=`musicbrainz`, batch=`mb-weekly-<날짜>`) | 최근 7일 공식 싱글 + 장르 태그 필수 + 상한. 롤백=배치 삭제. 배포 후 Vercel Cron 주 1회 예정 |
+| 태그 기반 좌표 배치 | `src/server/place-song.ts` | 즉석 편입·주간 신곡이 공용 | 세부 테마 구역 내 시드 랜덤 + 성단/은하 경계 클램프 |
 | 좌표 수학 유틸 | `src/lib/layout-math.ts` | 배치 스크립트·즉석 편입이 공용 | scripts/lib에서 이동 |
 | 장르→성단 매핑 | `src/config/genre-clusters.ts` | `themes` 테이블 (`scripts/build-themes.ts`가 생성) | 성단 12개·색상 포함. 매핑 변경은 신규 곡에만 적용 |
 | 앨범아트·미리듣기 | 외부 iTunes Search API | `songs.artwork_url/preview_url` (파생 캐시, `/api/enrich`) | `enriched_at`으로 조회 여부 기록. 실패 시 캐시 안 함 |
