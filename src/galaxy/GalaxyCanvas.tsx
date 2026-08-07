@@ -4,11 +4,11 @@
  * 구형 3D 은하 렌더러 (이슈 #4)
  * - 3만 곡을 GPU 포인트 2겹(코어+헤일로 글로우)으로 렌더링
  * - 3단계 LOD 라벨: 멀리=성단 12개 / 접근=세부 테마 / 진입=곡 제목
- * - 클릭 드릴다운: 성단 라벨 → 성단 진입, 세부 장르 라벨 → 진입 + 하단 곡 카드 캐러셀
- * - 곡 클릭 시 fly-to + 정보 패널, "전체 보기" 리셋
+ * - 클릭 드릴다운: 성단 라벨 → 성단 인기곡 카드, 세부 장르 라벨 → 그 장르 곡 카드
+ * - 카드: 앨범아트 + 30초 미리듣기(iTunes 캐시), 곡 선택 시 가수 정보(MusicBrainz 캐시)
  * 좌표는 서버가 준 값 그대로 사용한다 (좌표 불변 — 카메라만 움직인다).
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { GalaxyPayload, GalaxyTheme } from "./types";
@@ -22,16 +22,39 @@ const SONG_LABEL_DISTANCE = 130;
 const SONG_LABEL_POOL = 24;
 /** 하단 카드 캐러셀에 띄우는 최대 곡 수 (인기순) */
 const CARD_LIMIT = 150;
+/** 한 번에 보강 요청할 카드 수 (/api/enrich의 MAX_IDS와 일치) */
+const ENRICH_BATCH = 12;
 
 interface SelectedSong {
   title: string;
   artist: string;
 }
 
-interface ThemeCardData {
-  theme: GalaxyTheme;
-  clusterLabel: string;
-  songs: { index: number; title: string; artist: string; popularity: number }[];
+interface ArtistInfo {
+  type: string | null;
+  country: string | null;
+  beginYear: string | null;
+  tags: string[] | null;
+}
+
+interface CardSong {
+  index: number;
+  id: number;
+  title: string;
+  artist: string;
+  popularity: number;
+}
+
+interface CardData {
+  title: string;
+  subtitle: string;
+  color: string;
+  songs: CardSong[];
+}
+
+interface Media {
+  artworkUrl: string | null;
+  previewUrl: string | null;
 }
 
 const CORE_VERTEX = /* glsl */ `
@@ -83,12 +106,84 @@ export default function GalaxyCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const labelLayerRef = useRef<HTMLDivElement>(null);
   const cardScrollRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const resetRef = useRef<(() => void) | null>(null);
   const flySongRef = useRef<((index: number) => void) | null>(null);
+  const enrichRequested = useRef<Set<number>>(new Set());
   const [selected, setSelected] = useState<SelectedSong | null>(null);
-  const [cards, setCards] = useState<ThemeCardData | null>(null);
+  const [artistInfo, setArtistInfo] = useState<ArtistInfo | null>(null);
+  const [cards, setCards] = useState<CardData | null>(null);
+  const [media, setMedia] = useState<Record<number, Media>>({});
+  const [playingId, setPlayingId] = useState<number | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [songCount, setSongCount] = useState(0);
+
+  /** 곡 id 목록의 앨범아트/미리듣기를 서버 캐시에서 가져온다 (중복 요청 방지) */
+  const enrich = useCallback((ids: number[]) => {
+    const fresh = ids.filter((id) => !enrichRequested.current.has(id)).slice(0, ENRICH_BATCH);
+    if (fresh.length === 0) return;
+    fresh.forEach((id) => enrichRequested.current.add(id));
+    fetch("/api/enrich", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: fresh }),
+    })
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((data: Record<number, Media>) => setMedia((prev) => ({ ...prev, ...data })))
+      .catch(() => fresh.forEach((id) => enrichRequested.current.delete(id)));
+  }, []);
+
+  /** 카드 스크롤 시 화면에 들어온 카드들을 보강 */
+  const onCardScroll = useCallback(() => {
+    const el = cardScrollRef.current;
+    if (!el || !cards) return;
+    const cardWidth = 172; // w-40(160px) + gap 12px
+    const first = Math.max(0, Math.floor(el.scrollLeft / cardWidth) - 1);
+    const visible = cards.songs.slice(first, first + ENRICH_BATCH).map((s) => s.id);
+    enrich(visible);
+  }, [cards, enrich]);
+
+  /** 미리듣기 토글 (한 번에 한 곡만) */
+  const togglePreview = useCallback((songId: number, previewUrl: string) => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio();
+      audioRef.current.volume = 0.8;
+    }
+    const audio = audioRef.current;
+    setPlayingId((current) => {
+      if (current === songId) {
+        audio.pause();
+        return null;
+      }
+      audio.src = previewUrl;
+      void audio.play();
+      audio.onended = () => setPlayingId(null);
+      return songId;
+    });
+  }, []);
+
+  // 곡 선택 시 가수 정보 조회 (MusicBrainz 캐시)
+  useEffect(() => {
+    setArtistInfo(null);
+    if (!selected) return;
+    let cancelled = false;
+    fetch(`/api/artist?name=${encodeURIComponent(selected.artist)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((info: ArtistInfo | null) => {
+        if (!cancelled && info && (info.type || info.country || info.beginYear)) {
+          setArtistInfo(info);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
+
+  // 카드가 열리면 첫 배치 보강
+  useEffect(() => {
+    if (cards) enrich(cards.songs.slice(0, ENRICH_BATCH).map((s) => s.id));
+  }, [cards, enrich]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -193,15 +288,15 @@ export default function GalaxyCanvas() {
       flyTo(new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]), 45);
     };
 
-    /** 세부 장르 라벨/클릭 → 진입 + 하단 곡 카드 채우기 */
-    const openTheme = (theme: GalaxyTheme, parent: GalaxyTheme) => {
-      if (!payload) return;
-      flyTo(new THREE.Vector3(theme.x, theme.y, theme.z), theme.radius * 2.4);
-      const items: ThemeCardData["songs"] = [];
+    /** 특정 테마(성단 또는 세부 장르)에 속한 곡 인덱스를 인기순 카드 데이터로 만든다 */
+    const collectSongs = (match: (subThemeId: number) => boolean): CardSong[] => {
+      if (!payload) return [];
+      const items: CardSong[] = [];
       for (let i = 0; i < payload.songs.id.length; i++) {
-        if (payload.songs.themeId[i] === theme.id) {
+        if (match(payload.songs.themeId[i])) {
           items.push({
             index: i,
+            id: payload.songs.id[i],
             title: payload.songs.title[i],
             artist: payload.songs.artist[i],
             popularity: payload.songs.popularity[i],
@@ -209,8 +304,39 @@ export default function GalaxyCanvas() {
         }
       }
       items.sort((a, b) => b.popularity - a.popularity);
+      return items.slice(0, CARD_LIMIT);
+    };
+
+    /** 성단 클릭 → 성단 전체 인기곡 카드 */
+    const openCluster = (cluster: GalaxyTheme) => {
+      if (!payload) return;
+      flyTo(new THREE.Vector3(cluster.x, cluster.y, cluster.z), cluster.radius * 2.3);
+      const childIds = new Set(
+        payload.themes.filter((t) => t.parentId === cluster.id).map((t) => t.id),
+      );
+      const songs = collectSongs((id) => childIds.has(id));
       setSelected(null);
-      setCards({ theme, clusterLabel: parent.label, songs: items.slice(0, CARD_LIMIT) });
+      setCards({
+        title: cluster.label,
+        subtitle: `성단 전체 인기곡 · ${songs.length}곡`,
+        color: cluster.color,
+        songs,
+      });
+      cardScrollRef.current?.scrollTo({ left: 0 });
+    };
+
+    /** 세부 장르 클릭 → 그 장르 곡 카드 */
+    const openTheme = (theme: GalaxyTheme, parent: GalaxyTheme) => {
+      if (!payload) return;
+      flyTo(new THREE.Vector3(theme.x, theme.y, theme.z), theme.radius * 2.4);
+      const songs = collectSongs((id) => id === theme.id);
+      setSelected(null);
+      setCards({
+        title: theme.label,
+        subtitle: `${parent.label} · ${songs.length}곡`,
+        color: theme.color,
+        songs,
+      });
       cardScrollRef.current?.scrollTo({ left: 0 });
     };
 
@@ -268,10 +394,7 @@ export default function GalaxyCanvas() {
         for (const t of data.themes) {
           if (t.level === 1) {
             clusterLabels.push({
-              el: makeLabel(t.label, "lv1", t.color, () => {
-                setCards(null);
-                flyTo(new THREE.Vector3(t.x, t.y, t.z), t.radius * 2.3);
-              }),
+              el: makeLabel(t.label, "lv1", t.color, () => openCluster(t)),
               pos: new THREE.Vector3(t.x, t.y, t.z),
               theme: t,
             });
@@ -393,6 +516,7 @@ export default function GalaxyCanvas() {
       renderer.dispose();
       container.removeChild(renderer.domElement);
       labelLayer.replaceChildren();
+      audioRef.current?.pause();
     };
   }, []);
 
@@ -440,24 +564,34 @@ export default function GalaxyCanvas() {
       {/* 선택된 곡 패널 (카드 캐러셀이 열려 있으면 그 위로 올림) */}
       {selected && (
         <div
-          className={`absolute left-1/2 -translate-x-1/2 rounded-xl border border-white/15 bg-black/60 px-5 py-3 text-white backdrop-blur ${cards ? "bottom-56" : "bottom-6"}`}
+          className={`absolute left-1/2 -translate-x-1/2 rounded-xl border border-white/15 bg-black/60 px-5 py-3 text-white backdrop-blur ${cards ? "bottom-64" : "bottom-6"}`}
         >
           <p className="max-w-xs truncate text-sm font-medium">{selected.title}</p>
           <p className="max-w-xs truncate text-xs text-white/60">{selected.artist}</p>
+          {artistInfo && (
+            <p className="mt-1 max-w-xs truncate text-[11px] text-white/40">
+              {[
+                artistInfo.type === "Group" ? "그룹" : artistInfo.type === "Person" ? "솔로" : artistInfo.type,
+                artistInfo.country,
+                artistInfo.beginYear && `${artistInfo.beginYear}~`,
+                artistInfo.tags?.slice(0, 3).join(", "),
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
         </div>
       )}
 
-      {/* 하단 곡 카드 캐러셀 (세부 장르 클릭 시) */}
+      {/* 하단 곡 카드 캐러셀 (성단/세부 장르 클릭 시) */}
       {cards && (
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pb-4 pt-8">
           <div className="mb-2 flex items-center justify-between px-5">
             <p className="text-sm text-white/90">
-              <span className="font-semibold" style={{ color: cards.theme.color }}>
-                {cards.theme.label}
+              <span className="font-semibold" style={{ color: cards.color }}>
+                {cards.title}
               </span>
-              <span className="ml-2 text-white/50">
-                {cards.clusterLabel} · {cards.songs.length}곡
-              </span>
+              <span className="ml-2 text-white/50">{cards.subtitle}</span>
             </p>
             <button
               type="button"
@@ -479,24 +613,60 @@ export default function GalaxyCanvas() {
             </button>
             <div
               ref={cardScrollRef}
+              onScroll={onCardScroll}
               className="scrollbar-none flex snap-x gap-3 overflow-x-auto scroll-smooth px-10"
             >
-              {cards.songs.map((song) => (
-                <button
-                  type="button"
-                  key={song.index}
-                  onClick={() => flySongRef.current?.(song.index)}
-                  className="w-40 shrink-0 snap-start rounded-xl border border-white/10 bg-white/5 p-3 text-left backdrop-blur transition hover:border-white/30 hover:bg-white/10"
-                >
+              {cards.songs.map((song) => {
+                const m = media[song.id];
+                const isPlaying = playingId === song.id;
+                return (
                   <div
-                    className="mb-2 h-1 w-8 rounded-full"
-                    style={{ background: cards.theme.color }}
-                  />
-                  <p className="truncate text-sm font-medium text-white">{song.title}</p>
-                  <p className="truncate text-xs text-white/50">{song.artist}</p>
-                  <p className="mt-1 text-[10px] text-white/35">인기도 {song.popularity}</p>
-                </button>
-              ))}
+                    key={song.id}
+                    className="w-40 shrink-0 snap-start overflow-hidden rounded-xl border border-white/10 bg-white/5 text-left backdrop-blur transition hover:border-white/30 hover:bg-white/10"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => flySongRef.current?.(song.index)}
+                      className="block w-full"
+                      aria-label={`${song.title} 별로 이동`}
+                    >
+                      <div className="relative h-24 w-full bg-white/5">
+                        {m?.artworkUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지, 최적화 프록시 불필요
+                          <img
+                            src={m.artworkUrl}
+                            alt=""
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div
+                            className="grid h-full w-full place-items-center text-2xl"
+                            style={{ color: cards.color }}
+                          >
+                            ✦
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                    <div className="relative p-2.5">
+                      <p className="truncate pr-7 text-sm font-medium text-white">{song.title}</p>
+                      <p className="truncate pr-7 text-xs text-white/50">{song.artist}</p>
+                      <p className="mt-0.5 text-[10px] text-white/35">인기도 {song.popularity}</p>
+                      {m?.previewUrl && (
+                        <button
+                          type="button"
+                          onClick={() => togglePreview(song.id, m.previewUrl!)}
+                          className={`absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full border text-xs transition ${isPlaying ? "border-white/60 bg-white/25 text-white" : "border-white/20 bg-white/10 text-white/70 hover:bg-white/20"}`}
+                          aria-label={isPlaying ? "미리듣기 정지" : "30초 미리듣기"}
+                        >
+                          {isPlaying ? "❚❚" : "▶"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             <button
               type="button"

@@ -52,9 +52,27 @@ export const songs = pgTable(
     /** 적재 배치 식별자. 신곡 파이프라인 롤백용 (이슈 #7) */
     batchId: text("batch_id").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    /**
+     * 미디어 보강 캐시 — 원본은 iTunes Search API (docs/SSOT.md).
+     * enrichedAt이 있으면 조회를 시도한 것 (결과가 없어도 재조회하지 않기 위함).
+     * 좌표 불변 원칙과 무관한 부가 메타데이터라 사후 갱신 허용.
+     */
+    artworkUrl: text("artwork_url"),
+    previewUrl: text("preview_url"),
+    enrichedAt: timestamp("enriched_at"),
   },
   (table) => [uniqueIndex("songs_source_unique").on(table.source, table.sourceId)],
 );
+
+/** 가수 정보 캐시 — 원본은 MusicBrainz API (CC0). name 기준 1회 조회 후 재사용 */
+export const artists = pgTable("artists", {
+  name: text("name").primaryKey(),
+  type: text("type"),
+  country: text("country"),
+  beginYear: text("begin_year"),
+  tags: jsonb("tags").$type<string[] | null>(),
+  checkedAt: timestamp("checked_at").notNull().defaultNow(),
+});
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),

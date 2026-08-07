@@ -17,4 +17,6 @@
 | 유저 취향 원본 | `likes` 테이블 | `user_stars`(파생 캐시) | 무효화: 좋아요 변경 시 즉시 재계산 |
 | 곡 데이터 원천 | HuggingFace `maharshipandya/spotify-tracks-dataset` → `scripts/ingest-dataset.ts` | `songs` 테이블 (3만 곡) | 멱등: `(source, source_id)` 유니크 |
 | 장르→성단 매핑 | `src/config/genre-clusters.ts` | `themes` 테이블 (`scripts/build-themes.ts`가 생성) | 성단 12개·색상 포함. 매핑 변경은 신규 곡에만 적용 |
+| 앨범아트·미리듣기 | 외부 iTunes Search API | `songs.artwork_url/preview_url` (파생 캐시, `/api/enrich`) | `enriched_at`으로 조회 여부 기록. 실패 시 캐시 안 함 |
+| 가수 정보 | 외부 MusicBrainz API (CC0) | `artists` 테이블 (파생 캐시, `/api/artist`) | 이름당 1회 조회. 검색 점수 85 미만은 버림(오매칭 방지) |
 | 곡 좌표 | `songs.pos_x/y/z` (`scripts/layout-songs.ts`가 1회 기록) | 렌더러 페이로드 | 기록 후 불변. NULL인 곡만 채움. 배치 수학: `scripts/lib/layout-math.ts` |
