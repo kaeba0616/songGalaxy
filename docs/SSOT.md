@@ -11,6 +11,7 @@
 | 제품 스펙·확정 결정(D1~D13) | [에픽 이슈 #1](https://github.com/kaeba0616/songGalaxy/issues/1) | 하위 이슈 #2~#8 | 스펙 본문을 다른 문서에 복제하지 말 것 |
 | 작업 단위·순서·완료 기준 | 이슈 #2~#8 | — | 각 이슈의 Acceptance Criteria가 완료 정의 |
 | 개발 프로세스 규칙 | `.claude/skills/ssot/SKILL.md`, `.claude/skills/commit-with-prompts/SKILL.md` | — | |
+| 배포·운영 환경 | Vercel 프로젝트 `song-galaxy` (https://song-galaxy.vercel.app) | — | 프로덕션 DB = Neon(Marketplace, env 자동 주입). 로컬 dev DB = Docker 5433 (.env). 환경별 DATABASE_URL로 분리 |
 | DB 스키마 | `src/db/schema.ts` (Drizzle) | 마이그레이션(`drizzle-kit push`), TS 타입(`$inferSelect`) | SQL·타입 수기 중복 정의 금지 |
 | 앱 상수 | `src/config/constants.ts` | — | `MIN_LIKES_FOR_STAR=5`, `BIG_THEME_COUNT=12`, `GALAXY_SONG_COUNT=30000` 등 |
 | 환경변수 접근 | `.env` → `src/config/env.ts` | — | `process.env` 직접 접근 금지 (예외: `drizzle.config.ts`, 파일 내 주석 참조) |

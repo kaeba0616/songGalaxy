@@ -2,6 +2,8 @@
 
 음악을 은하계로 시각화하는 웹사이트. 수만 곡이 성운처럼 깔린 3D 은하에서, 사람들은 좋아요한 곡들의 중심에 크고 밝은 별로 찍힌다.
 
+**Live: https://song-galaxy.vercel.app**
+
 - 스펙·확정 결정: [에픽 이슈 #1](https://github.com/kaeba0616/songGalaxy/issues/1) (SSOT)
 - 진실의 원본 위치: [docs/SSOT.md](docs/SSOT.md)
 - 커밋 메시지의 `[Prompts]` 섹션에 이 프로젝트를 만든 실제 프롬프트가 기록되어 있다
