@@ -2,6 +2,8 @@ import Link from "next/link";
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
+import { searchExternal } from "@/server/import-song";
+import { importSongAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +60,9 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
       .where(where),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // 검색어가 있으면 은하 밖(iTunes)에서도 후보를 찾는다 — 신인·최신곡 즉석 편입 경로
+  const external = q && page === 1 ? await searchExternal(q) : [];
 
   /** 현재 필터를 유지한 채 일부 파라미터만 바꾼 URL */
   const pageUrl = (overrides: Partial<SongsSearchParams>) => {
@@ -171,6 +176,56 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
             <li className="px-4 py-10 text-center text-sm text-white/40">검색 결과가 없습니다</li>
           )}
         </ul>
+
+        {/* 은하 밖에서 검색 — iTunes 결과를 새 별로 편입 (신인·최신곡 커버) */}
+        {external.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-1 text-sm font-medium text-white/70">은하 밖에서 검색</h2>
+            <p className="mb-3 text-xs text-white/40">
+              아직 은하에 없는 곡이면 추가해서 새 별로 태어나게 할 수 있어요
+            </p>
+            <ul className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-dashed border-white/15 bg-white/[0.02]">
+              {external.map((ext) => (
+                <li key={ext.itunesId} className="flex items-center gap-4 px-4 py-3">
+                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/5">
+                    {ext.artworkUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지
+                      <img src={ext.artworkUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+                    ) : (
+                      <div className="grid h-full w-full place-items-center text-white/20">✦</div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{ext.title}</p>
+                    <p className="truncate text-xs text-white/50">
+                      {ext.artist}
+                      {ext.releaseYear && <span className="ml-1.5 text-white/30">· {ext.releaseYear}</span>}
+                      {ext.genre && <span className="ml-1.5 text-white/30">· {ext.genre}</span>}
+                    </p>
+                  </div>
+                  {ext.existingSongId ? (
+                    <Link
+                      href={`/songs/${ext.existingSongId}`}
+                      className="shrink-0 rounded-full border border-white/15 px-3.5 py-1.5 text-xs text-white/60 transition hover:bg-white/10"
+                    >
+                      이미 있어요 →
+                    </Link>
+                  ) : (
+                    <form action={importSongAction}>
+                      <input type="hidden" name="itunesId" value={ext.itunesId} />
+                      <button
+                        type="submit"
+                        className="shrink-0 rounded-full border border-white/25 bg-white/10 px-3.5 py-1.5 text-xs transition hover:bg-white/20"
+                      >
+                        ✦ 은하에 추가
+                      </button>
+                    </form>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {/* 페이지네이션 */}
         {totalPages > 1 && (

@@ -15,7 +15,9 @@
 | 앱 상수 | `src/config/constants.ts` | — | `MIN_LIKES_FOR_STAR=5`, `BIG_THEME_COUNT=12`, `GALAXY_SONG_COUNT=30000` 등 |
 | 환경변수 접근 | `.env` → `src/config/env.ts` | — | `process.env` 직접 접근 금지 (예외: `drizzle.config.ts`, 파일 내 주석 참조) |
 | 유저 취향 원본 | `likes` 테이블 | `user_stars`(파생 캐시) | 무효화: 좋아요 변경 시 즉시 재계산 |
-| 곡 데이터 원천 | HuggingFace `maharshipandya/spotify-tracks-dataset` → `scripts/ingest-dataset.ts` | `songs` 테이블 (3만 곡) | 멱등: `(source, source_id)` 유니크 |
+| 곡 데이터 원천(기본) | HuggingFace `maharshipandya/spotify-tracks-dataset` → `scripts/ingest-dataset.ts` | `songs` 테이블 (3만 곡, source=`spotify-tracks-114k`) | 멱등: `(source, source_id)` 유니크. 2022-10 스냅샷 |
+| 곡 데이터 원천(즉석 편입) | 외부 iTunes Search API → `src/server/import-song.ts` | `songs` 테이블 (source=`itunes`, batch=`user-import`) | /songs 검색에서 유저 트리거. iTunes 장르 매핑: `genre-clusters.ts`의 `ITUNES_GENRE_TO_GENRE` |
+| 좌표 수학 유틸 | `src/lib/layout-math.ts` | 배치 스크립트·즉석 편입이 공용 | scripts/lib에서 이동 |
 | 장르→성단 매핑 | `src/config/genre-clusters.ts` | `themes` 테이블 (`scripts/build-themes.ts`가 생성) | 성단 12개·색상 포함. 매핑 변경은 신규 곡에만 적용 |
 | 앨범아트·미리듣기 | 외부 iTunes Search API | `songs.artwork_url/preview_url` (파생 캐시, `/api/enrich`) | `enriched_at`으로 조회 여부 기록. 실패 시 캐시 안 함 |
 | 가수 정보 | 외부 MusicBrainz API (CC0) | `artists` 테이블 (파생 캐시, `src/server/artist-info.ts`) | 이름당 1회 조회. 검색 점수 85 미만은 버림(오매칭 방지) |

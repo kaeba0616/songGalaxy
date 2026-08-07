@@ -11,7 +11,7 @@
 import { eq, isNull, sql } from "drizzle-orm";
 import { db, schema } from "../src/db";
 import { GALAXY_RADIUS } from "../src/config/constants";
-import { hashString, mulberry32, pcaScores, scaleToUnit, zscore } from "./lib/layout-math";
+import { hashString, mulberry32, pcaScores, scaleToUnit, zscore } from "../src/lib/layout-math";
 
 /** PCA 입력으로 쓸 특징 (scripts/ingest-dataset.ts의 FEATURE_COLUMNS와 일치) */
 const FEATURE_KEYS = [

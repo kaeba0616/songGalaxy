@@ -119,3 +119,63 @@ export const GENRE_CLUSTERS: ClusterDef[] = [
 export const GENRE_TO_CLUSTER: ReadonlyMap<string, ClusterDef> = new Map(
   GENRE_CLUSTERS.flatMap((cluster) => cluster.genres.map((genre) => [genre, cluster])),
 );
+
+/**
+ * iTunes primaryGenreName → 우리 장르(세부 테마 이름) 매핑 — SSOT.
+ * 검색 즉석 편입(user-import) 시 새 곡의 소속 세부 테마를 정한다.
+ * 매핑에 없는 iTunes 장르는 ITUNES_GENRE_FALLBACK으로 배정한다.
+ */
+export const ITUNES_GENRE_TO_GENRE: Record<string, string> = {
+  "K-Pop": "k-pop",
+  "J-Pop": "j-pop",
+  Anime: "anime",
+  Pop: "pop",
+  "Pop/Rock": "rock",
+  Rock: "rock",
+  Alternative: "alternative",
+  "Indie Rock": "indie",
+  Metal: "metal",
+  "Hard Rock": "hard-rock",
+  Punk: "punk",
+  "Hip-Hop/Rap": "hip-hop",
+  "R&B/Soul": "r-n-b",
+  Soul: "soul",
+  Funk: "funk",
+  Electronic: "electronic",
+  Dance: "dance",
+  House: "house",
+  Techno: "techno",
+  Dubstep: "dubstep",
+  Jazz: "jazz",
+  Blues: "blues",
+  Classical: "classical",
+  Opera: "opera",
+  "New Age": "new-age",
+  Country: "country",
+  Folk: "folk",
+  "Singer/Songwriter": "singer-songwriter",
+  Acoustic: "acoustic",
+  Latin: "latin",
+  Reggaeton: "reggaeton",
+  Salsa: "salsa",
+  Samba: "samba",
+  Tango: "tango",
+  Reggae: "reggae",
+  World: "world-music",
+  Worldwide: "world-music",
+  Afrobeats: "afrobeat",
+  "Christian & Gospel": "gospel",
+  Soundtrack: "show-tunes",
+  "Original Score": "show-tunes",
+  Disney: "disney",
+  "Children's Music": "children",
+  Ambient: "ambient",
+  Chill: "chill",
+  Mandopop: "mandopop",
+  Cantopop: "cantopop",
+};
+export const ITUNES_GENRE_FALLBACK = "pop";
+
+export function itunesGenreToGenre(itunesGenre: string): string {
+  return ITUNES_GENRE_TO_GENRE[itunesGenre] ?? ITUNES_GENRE_FALLBACK;
+}

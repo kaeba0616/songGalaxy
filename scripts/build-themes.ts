@@ -11,7 +11,7 @@ import { sql } from "drizzle-orm";
 import { db, schema } from "../src/db";
 import { GALAXY_RADIUS } from "../src/config/constants";
 import { GENRE_CLUSTERS } from "../src/config/genre-clusters";
-import { fibonacciSphere } from "./lib/layout-math";
+import { fibonacciSphere } from "../src/lib/layout-math";
 
 /** 성단 중심이 놓이는 구면 반지름 */
 const CLUSTER_SHELL_RADIUS = GALAXY_RADIUS * 0.6;
