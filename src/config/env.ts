@@ -24,4 +24,8 @@ export const env = {
   get authSecret(): string {
     return required("AUTH_SECRET");
   },
+  /** 선택값 — 없으면 곡 상세의 YouTube 재생이 검색 링크 폴백으로 동작 */
+  get youtubeApiKey(): string | null {
+    return process.env.YOUTUBE_API_KEY ?? null;
+  },
 };

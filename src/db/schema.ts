@@ -60,6 +60,13 @@ export const songs = pgTable(
     artworkUrl: text("artwork_url"),
     previewUrl: text("preview_url"),
     enrichedAt: timestamp("enriched_at"),
+    /** 가사 캐시 — 원본은 LRCLIB API (docs/SSOT.md). checked로 재조회 방지 */
+    plainLyrics: text("plain_lyrics"),
+    syncedLyrics: text("synced_lyrics"),
+    lyricsCheckedAt: timestamp("lyrics_checked_at"),
+    /** YouTube 영상 캐시 — 원본은 YouTube Data API (쿼터 보호: 곡당 1회 검색) */
+    youtubeVideoId: text("youtube_video_id"),
+    youtubeCheckedAt: timestamp("youtube_checked_at"),
   },
   (table) => [uniqueIndex("songs_source_unique").on(table.source, table.sourceId)],
 );

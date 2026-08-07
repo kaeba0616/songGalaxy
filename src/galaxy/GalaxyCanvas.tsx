@@ -102,7 +102,7 @@ function makePointsLayer(
   return new THREE.Points(geometry, material);
 }
 
-export default function GalaxyCanvas() {
+export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const labelLayerRef = useRef<HTMLDivElement>(null);
   const cardScrollRef = useRef<HTMLDivElement>(null);
@@ -307,10 +307,10 @@ export default function GalaxyCanvas() {
       return items.slice(0, CARD_LIMIT);
     };
 
-    /** 성단 클릭 → 성단 전체 인기곡 카드 */
+    /** 성단 클릭 → 성단 전체 인기곡 카드. 세부 장르 라벨이 보이는 거리(1.5R)까지 진입 */
     const openCluster = (cluster: GalaxyTheme) => {
       if (!payload) return;
-      flyTo(new THREE.Vector3(cluster.x, cluster.y, cluster.z), cluster.radius * 2.3);
+      flyTo(new THREE.Vector3(cluster.x, cluster.y, cluster.z), cluster.radius * 1.5);
       const childIds = new Set(
         payload.themes.filter((t) => t.parentId === cluster.id).map((t) => t.id),
       );
@@ -414,6 +414,11 @@ export default function GalaxyCanvas() {
           songLabels.push({ el: makeLabel("", "song"), index: -1 });
         }
         setStatus("ready");
+        // /songs/[id]의 "은하에서 보기" 딥링크 (?song=ID) → 해당 곡으로 비행
+        if (initialSongId != null) {
+          const idx = data.songs.id.indexOf(initialSongId);
+          if (idx >= 0) flySongRef.current?.(idx);
+        }
       })
       .catch((err) => {
         console.error("galaxy payload load failed", err);
@@ -454,13 +459,13 @@ export default function GalaxyCanvas() {
         for (const l of clusterLabels) {
           const d = camera.position.distanceTo(l.pos);
           const r = l.theme.radius;
-          // 멀면 보이고, 성단에 접근하면 사라진다
-          placeLabel(l.el, l.pos, (d - r * 1.15) / (r * 1.2));
+          // 멀면 보이고, 성단 클릭 도착 지점(1.5R)부터는 사라져 세부 장르에 자리를 내준다
+          placeLabel(l.el, l.pos, (d - r * 1.5) / (r * 1.1));
         }
         for (const l of subLabels) {
           const dParent = camera.position.distanceTo(new THREE.Vector3(l.parent.x, l.parent.y, l.parent.z));
           const d = camera.position.distanceTo(l.pos);
-          const near = 1 - (dParent - l.parent.radius * 0.4) / (l.parent.radius * 1.6); // 성단 접근도
+          const near = 1 - (dParent - l.parent.radius * 0.6) / (l.parent.radius * 1.8); // 성단 접근도 (2.4R부터 서서히)
           const notInside = (d - l.theme.radius * 0.5) / (l.theme.radius * 0.8); // 세부 테마 진입 시 페이드
           placeLabel(l.el, l.pos, Math.min(near, notInside));
         }
@@ -622,14 +627,10 @@ export default function GalaxyCanvas() {
                 return (
                   <div
                     key={song.id}
-                    className="w-40 shrink-0 snap-start overflow-hidden rounded-xl border border-white/10 bg-white/5 text-left backdrop-blur transition hover:border-white/30 hover:bg-white/10"
+                    className="relative w-40 shrink-0 snap-start overflow-hidden rounded-xl border border-white/10 bg-white/5 text-left backdrop-blur transition hover:border-white/30 hover:bg-white/10"
                   >
-                    <button
-                      type="button"
-                      onClick={() => flySongRef.current?.(song.index)}
-                      className="block w-full"
-                      aria-label={`${song.title} 별로 이동`}
-                    >
+                    {/* 카드 클릭 → 곡 상세 페이지 */}
+                    <a href={`/songs/${song.id}`} className="block" aria-label={`${song.title} 상세 보기`}>
                       <div className="relative h-24 w-full bg-white/5">
                         {m?.artworkUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지, 최적화 프록시 불필요
@@ -648,17 +649,29 @@ export default function GalaxyCanvas() {
                           </div>
                         )}
                       </div>
-                    </button>
-                    <div className="relative p-2.5">
-                      <p className="truncate pr-7 text-sm font-medium text-white">{song.title}</p>
-                      <p className="truncate pr-7 text-xs text-white/50">{song.artist}</p>
-                      <p className="mt-0.5 text-[10px] text-white/35">인기도 {song.popularity}</p>
+                      <div className="p-2.5 pb-8">
+                        <p className="truncate text-sm font-medium text-white">{song.title}</p>
+                        <p className="truncate text-xs text-white/50">{song.artist}</p>
+                        <p className="mt-0.5 text-[10px] text-white/35">인기도 {song.popularity}</p>
+                      </div>
+                    </a>
+                    <div className="absolute bottom-2 right-2 flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => flySongRef.current?.(song.index)}
+                        className="grid h-7 w-7 place-items-center rounded-full border border-white/20 bg-white/10 text-xs text-white/70 transition hover:bg-white/20"
+                        aria-label={`${song.title} 별로 이동`}
+                        title="은하에서 이 별로 이동"
+                      >
+                        ✦
+                      </button>
                       {m?.previewUrl && (
                         <button
                           type="button"
                           onClick={() => togglePreview(song.id, m.previewUrl!)}
-                          className={`absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full border text-xs transition ${isPlaying ? "border-white/60 bg-white/25 text-white" : "border-white/20 bg-white/10 text-white/70 hover:bg-white/20"}`}
+                          className={`grid h-7 w-7 place-items-center rounded-full border text-xs transition ${isPlaying ? "border-white/60 bg-white/25 text-white" : "border-white/20 bg-white/10 text-white/70 hover:bg-white/20"}`}
                           aria-label={isPlaying ? "미리듣기 정지" : "30초 미리듣기"}
+                          title="30초 미리듣기"
                         >
                           {isPlaying ? "❚❚" : "▶"}
                         </button>
