@@ -547,13 +547,21 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={() => resetRef.current?.()}
-        className="absolute right-4 top-4 rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
-      >
-        전체 보기
-      </button>
+      <div className="absolute right-4 top-4 flex gap-2">
+        <a
+          href="/songs"
+          className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
+        >
+          곡 목록
+        </a>
+        <button
+          type="button"
+          onClick={() => resetRef.current?.()}
+          className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
+        >
+          전체 보기
+        </button>
+      </div>
 
       {status === "loading" && (
         <div className="absolute inset-0 grid place-items-center text-white/70">
