@@ -4,6 +4,7 @@
  * 구형 3D 은하 렌더러 (이슈 #4)
  * - 3만 곡을 GPU 포인트 2겹(코어+헤일로 글로우)으로 렌더링
  * - 3단계 LOD 라벨: 멀리=성단 12개 / 접근=세부 테마 / 진입=곡 제목
+ * - 클릭 드릴다운: 성단 라벨 → 성단 진입, 세부 장르 라벨 → 진입 + 하단 곡 카드 캐러셀
  * - 곡 클릭 시 fly-to + 정보 패널, "전체 보기" 리셋
  * 좌표는 서버가 준 값 그대로 사용한다 (좌표 불변 — 카메라만 움직인다).
  */
@@ -19,10 +20,18 @@ const OVERVIEW_DISTANCE = 2600;
 const SONG_LABEL_DISTANCE = 130;
 /** 동시에 띄우는 곡 라벨 수 */
 const SONG_LABEL_POOL = 24;
+/** 하단 카드 캐러셀에 띄우는 최대 곡 수 (인기순) */
+const CARD_LIMIT = 150;
 
 interface SelectedSong {
   title: string;
   artist: string;
+}
+
+interface ThemeCardData {
+  theme: GalaxyTheme;
+  clusterLabel: string;
+  songs: { index: number; title: string; artist: string; popularity: number }[];
 }
 
 const CORE_VERTEX = /* glsl */ `
@@ -73,8 +82,11 @@ function makePointsLayer(
 export default function GalaxyCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const labelLayerRef = useRef<HTMLDivElement>(null);
+  const cardScrollRef = useRef<HTMLDivElement>(null);
   const resetRef = useRef<(() => void) | null>(null);
+  const flySongRef = useRef<((index: number) => void) | null>(null);
   const [selected, setSelected] = useState<SelectedSong | null>(null);
+  const [cards, setCards] = useState<ThemeCardData | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [songCount, setSongCount] = useState(0);
 
@@ -126,22 +138,31 @@ export default function GalaxyCanvas() {
       scene.add(new THREE.Points(geo, mat));
     }
 
-    // 라벨 DOM 유틸
+    // 라벨 DOM 유틸 (onClick이 있으면 클릭 가능한 내비게이션 라벨)
     interface Label {
       el: HTMLDivElement;
       pos: THREE.Vector3;
       theme?: GalaxyTheme;
     }
-    const makeLabel = (text: string, cls: string, color?: string): HTMLDivElement => {
+    const makeLabel = (
+      text: string,
+      cls: string,
+      color?: string,
+      onClick?: () => void,
+    ): HTMLDivElement => {
       const el = document.createElement("div");
       el.textContent = text;
       el.className = `galaxy-label ${cls}`;
       if (color) el.style.color = color;
+      if (onClick) {
+        el.classList.add("clickable");
+        el.addEventListener("click", onClick);
+      }
       labelLayer.appendChild(el);
       return el;
     };
 
-    const clusterLabels: Label[] = [];
+    const clusterLabels: (Label & { theme: GalaxyTheme })[] = [];
     const subLabels: (Label & { theme: GalaxyTheme; parent: GalaxyTheme })[] = [];
     const songLabels: { el: HTMLDivElement; index: number }[] = [];
     let payload: GalaxyPayload | null = null;
@@ -163,7 +184,34 @@ export default function GalaxyCanvas() {
     };
     resetRef.current = () => {
       setSelected(null);
+      setCards(null);
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
+    };
+    flySongRef.current = (index: number) => {
+      if (!positions || !payload) return;
+      setSelected({ title: payload.songs.title[index], artist: payload.songs.artist[index] });
+      flyTo(new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]), 45);
+    };
+
+    /** 세부 장르 라벨/클릭 → 진입 + 하단 곡 카드 채우기 */
+    const openTheme = (theme: GalaxyTheme, parent: GalaxyTheme) => {
+      if (!payload) return;
+      flyTo(new THREE.Vector3(theme.x, theme.y, theme.z), theme.radius * 2.4);
+      const items: ThemeCardData["songs"] = [];
+      for (let i = 0; i < payload.songs.id.length; i++) {
+        if (payload.songs.themeId[i] === theme.id) {
+          items.push({
+            index: i,
+            title: payload.songs.title[i],
+            artist: payload.songs.artist[i],
+            popularity: payload.songs.popularity[i],
+          });
+        }
+      }
+      items.sort((a, b) => b.popularity - a.popularity);
+      setSelected(null);
+      setCards({ theme, clusterLabel: parent.label, songs: items.slice(0, CARD_LIMIT) });
+      cardScrollRef.current?.scrollTo({ left: 0 });
     };
 
     // 클릭(드래그 아님) → 곡 선택
@@ -182,12 +230,9 @@ export default function GalaxyCanvas() {
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       raycaster.setFromCamera(ndc, camera);
-      const hits = raycaster.intersectObject(points);
-      const hit = hits[0];
+      const hit = raycaster.intersectObject(points)[0];
       if (hit?.index == null) return;
-      const i = hit.index;
-      setSelected({ title: payload.songs.title[i], artist: payload.songs.artist[i] });
-      flyTo(new THREE.Vector3(positions![i * 3], positions![i * 3 + 1], positions![i * 3 + 2]), 45);
+      flySongRef.current?.(hit.index);
     };
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
@@ -222,11 +267,23 @@ export default function GalaxyCanvas() {
 
         for (const t of data.themes) {
           if (t.level === 1) {
-            clusterLabels.push({ el: makeLabel(t.label, "lv1", t.color), pos: new THREE.Vector3(t.x, t.y, t.z), theme: t });
+            clusterLabels.push({
+              el: makeLabel(t.label, "lv1", t.color, () => {
+                setCards(null);
+                flyTo(new THREE.Vector3(t.x, t.y, t.z), t.radius * 2.3);
+              }),
+              pos: new THREE.Vector3(t.x, t.y, t.z),
+              theme: t,
+            });
           } else {
             const parent = data.themes.find((p) => p.id === t.parentId);
             if (parent) {
-              subLabels.push({ el: makeLabel(t.label, "lv2", t.color), pos: new THREE.Vector3(t.x, t.y, t.z), theme: t, parent });
+              subLabels.push({
+                el: makeLabel(t.label, "lv2", t.color, () => openTheme(t, parent)),
+                pos: new THREE.Vector3(t.x, t.y, t.z),
+                theme: t,
+                parent,
+              });
             }
           }
         }
@@ -247,9 +304,11 @@ export default function GalaxyCanvas() {
       const behind = proj.z > 1;
       if (behind || opacity <= 0.02) {
         el.style.opacity = "0";
+        el.style.pointerEvents = "none";
         return;
       }
       el.style.opacity = String(Math.min(1, opacity));
+      el.style.pointerEvents = el.classList.contains("clickable") ? "auto" : "none";
       el.style.transform = `translate(-50%, -50%) translate(${((proj.x + 1) / 2) * 100}cqw, ${((1 - proj.y) / 2) * 100}cqh)`;
     };
 
@@ -271,7 +330,7 @@ export default function GalaxyCanvas() {
       if (frame % 2 === 0) {
         for (const l of clusterLabels) {
           const d = camera.position.distanceTo(l.pos);
-          const r = l.theme!.radius;
+          const r = l.theme.radius;
           // 멀면 보이고, 성단에 접근하면 사라진다
           placeLabel(l.el, l.pos, (d - r * 1.15) / (r * 1.2));
         }
@@ -337,6 +396,11 @@ export default function GalaxyCanvas() {
     };
   }, []);
 
+  const scrollCards = (dir: -1 | 1) => {
+    const el = cardScrollRef.current;
+    if (el) el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: "smooth" });
+  };
+
   return (
     <div className="relative h-dvh w-full overflow-hidden" style={{ background: GALAXY_BG }}>
       <div ref={containerRef} className="absolute inset-0" />
@@ -350,7 +414,7 @@ export default function GalaxyCanvas() {
       <div className="pointer-events-none absolute left-4 top-4 text-white/90">
         <h1 className="text-lg font-semibold tracking-wide">songGalaxy</h1>
         {status === "ready" && (
-          <p className="text-xs text-white/50">{songCount.toLocaleString()}곡이 떠 있는 은하</p>
+          <p className="text-xs text-white/50">{songCount.toLocaleString()}곡이 떠 있는 은하 · 장르를 클릭해 들어가보세요</p>
         )}
       </div>
 
@@ -373,11 +437,76 @@ export default function GalaxyCanvas() {
         </div>
       )}
 
-      {/* 선택된 곡 패널 */}
+      {/* 선택된 곡 패널 (카드 캐러셀이 열려 있으면 그 위로 올림) */}
       {selected && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-xl border border-white/15 bg-black/60 px-5 py-3 text-white backdrop-blur">
+        <div
+          className={`absolute left-1/2 -translate-x-1/2 rounded-xl border border-white/15 bg-black/60 px-5 py-3 text-white backdrop-blur ${cards ? "bottom-56" : "bottom-6"}`}
+        >
           <p className="max-w-xs truncate text-sm font-medium">{selected.title}</p>
           <p className="max-w-xs truncate text-xs text-white/60">{selected.artist}</p>
+        </div>
+      )}
+
+      {/* 하단 곡 카드 캐러셀 (세부 장르 클릭 시) */}
+      {cards && (
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pb-4 pt-8">
+          <div className="mb-2 flex items-center justify-between px-5">
+            <p className="text-sm text-white/90">
+              <span className="font-semibold" style={{ color: cards.theme.color }}>
+                {cards.theme.label}
+              </span>
+              <span className="ml-2 text-white/50">
+                {cards.clusterLabel} · {cards.songs.length}곡
+              </span>
+            </p>
+            <button
+              type="button"
+              onClick={() => setCards(null)}
+              className="rounded-full px-2 text-white/60 transition hover:text-white"
+              aria-label="곡 목록 닫기"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => scrollCards(-1)}
+              className="absolute left-1 top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/20 bg-black/60 px-2.5 py-1.5 text-white/80 backdrop-blur transition hover:bg-black/80"
+              aria-label="이전 곡들"
+            >
+              ‹
+            </button>
+            <div
+              ref={cardScrollRef}
+              className="scrollbar-none flex snap-x gap-3 overflow-x-auto scroll-smooth px-10"
+            >
+              {cards.songs.map((song) => (
+                <button
+                  type="button"
+                  key={song.index}
+                  onClick={() => flySongRef.current?.(song.index)}
+                  className="w-40 shrink-0 snap-start rounded-xl border border-white/10 bg-white/5 p-3 text-left backdrop-blur transition hover:border-white/30 hover:bg-white/10"
+                >
+                  <div
+                    className="mb-2 h-1 w-8 rounded-full"
+                    style={{ background: cards.theme.color }}
+                  />
+                  <p className="truncate text-sm font-medium text-white">{song.title}</p>
+                  <p className="truncate text-xs text-white/50">{song.artist}</p>
+                  <p className="mt-1 text-[10px] text-white/35">인기도 {song.popularity}</p>
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => scrollCards(1)}
+              className="absolute right-1 top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/20 bg-black/60 px-2.5 py-1.5 text-white/80 backdrop-blur transition hover:bg-black/80"
+              aria-label="다음 곡들"
+            >
+              ›
+            </button>
+          </div>
         </div>
       )}
     </div>

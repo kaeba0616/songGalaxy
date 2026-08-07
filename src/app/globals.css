@@ -52,3 +52,18 @@ body {
   font-size: 0.68rem;
   color: rgba(255, 255, 255, 0.85);
 }
+.galaxy-label.clickable {
+  cursor: pointer;
+}
+.galaxy-label.clickable:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* 카드 캐러셀 스크롤바 숨김 */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
