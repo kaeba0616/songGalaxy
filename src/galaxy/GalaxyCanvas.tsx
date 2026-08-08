@@ -64,6 +64,8 @@ interface AuthState {
   nickname?: string;
   likedIds: Set<number>;
   likesCount: number;
+  /** 내 별 좌표 (없으면 아직 미탄생) — "내 별" 포커싱 버튼용 */
+  star: { x: number; y: number; z: number } | null;
 }
 
 const CORE_VERTEX = /* glsl */ `
@@ -136,6 +138,7 @@ export default function GalaxyCanvas({
     authenticated: false,
     likedIds: new Set(),
     likesCount: 0,
+    star: null,
   });
   const [toast, setToast] = useState<string | null>(null);
   const [selected, setSelected] = useState<SelectedSong | null>(null);
@@ -279,6 +282,7 @@ export default function GalaxyCanvas({
             nickname: data.nickname,
             likedIds: new Set(data.likedIds ?? []),
             likesCount: data.likesCount ?? 0,
+            star: data.star ?? null,
           });
           if (data.star && data.userId != null && focusMyStar) {
             // /me의 "은하에서 내 별 보기" — 씬 로드 후 비행하도록 약간 지연
@@ -316,7 +320,7 @@ export default function GalaxyCanvas({
           star: { x: number; y: number; z: number } | null;
           starBorn: boolean;
         };
-        setAuthState((prev) => ({ ...prev, likesCount: data.likesCount }));
+        setAuthState((prev) => ({ ...prev, likesCount: data.likesCount, star: data.star }));
         if (data.star && authState.userId != null) {
           starApiRef.current?.({
             userId: authState.userId,
@@ -700,7 +704,13 @@ export default function GalaxyCanvas({
         haloMat = halo.material as THREE.ShaderMaterial;
         scene.add(halo, points);
         minimapClusters = data.themes.filter((t) => t.level === 1);
-        data.stars.forEach(upsertStar); // 은하 주민들
+        // 은하 주민들 — 캐시 없는 별도 엔드포인트에서 항상 최신으로
+        fetch("/api/stars")
+          .then((r) => (r.ok ? r.json() : []))
+          .then((stars: GalaxyStar[]) => {
+            if (!disposed) stars.forEach(upsertStar);
+          })
+          .catch(() => undefined);
 
 
         for (const t of data.themes) {
@@ -890,6 +900,19 @@ export default function GalaxyCanvas({
       </div>
 
       <div className="absolute right-4 top-4 flex gap-2">
+        {authState.star && (
+          <button
+            type="button"
+            onClick={() => {
+              const s = authState.star!;
+              flyToPosRef.current?.(s.x, s.y, s.z, 120);
+            }}
+            className="rounded-full border border-amber-200/40 bg-amber-100/15 px-4 py-1.5 text-sm text-amber-100 backdrop-blur transition hover:bg-amber-100/25"
+            title="내 별로 이동"
+          >
+            ✦ 내 별
+          </button>
+        )}
         {authState.authenticated ? (
           <>
             <a

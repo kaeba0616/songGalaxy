@@ -18,7 +18,7 @@ export interface GalaxyTheme {
   color: string;
 }
 
-/** 은하 주민 — 취향 중심점에 뜬 유저의 별 (D2) */
+/** 은하 주민 — 취향 중심점에 뜬 유저의 별 (D2). /api/stars가 캐시 없이 내려준다 */
 export interface GalaxyStar {
   userId: number;
   nickname: string;
@@ -28,7 +28,6 @@ export interface GalaxyStar {
 }
 
 export interface GalaxyPayload {
-  stars: GalaxyStar[];
   songs: {
     id: number[];
     title: string[];

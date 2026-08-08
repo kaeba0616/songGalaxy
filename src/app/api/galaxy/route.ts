@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, isNotNull } from "drizzle-orm";
+import { isNotNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
 import type { GalaxyPayload, GalaxyTheme } from "@/galaxy/types";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 const CLUSTER_LABEL = new Map(GENRE_CLUSTERS.map((c) => [c.slug, c.label]));
 
 export async function GET(): Promise<NextResponse> {
-  const [themeRows, songRows, starRows] = await Promise.all([
+  const [themeRows, songRows] = await Promise.all([
     db.select().from(schema.themes),
     db
       .select({
@@ -24,16 +24,6 @@ export async function GET(): Promise<NextResponse> {
       })
       .from(schema.songs)
       .where(isNotNull(schema.songs.posX)),
-    db
-      .select({
-        userId: schema.userStars.userId,
-        x: schema.userStars.posX,
-        y: schema.userStars.posY,
-        z: schema.userStars.posZ,
-        nickname: schema.users.nickname,
-      })
-      .from(schema.userStars)
-      .innerJoin(schema.users, eq(schema.users.id, schema.userStars.userId)),
   ]);
 
   const themes: GalaxyTheme[] = themeRows.map((t) => ({
@@ -51,7 +41,6 @@ export async function GET(): Promise<NextResponse> {
 
   const n = songRows.length;
   const payload: GalaxyPayload = {
-    stars: starRows,
     songs: {
       id: new Array(n),
       title: new Array(n),
