@@ -698,12 +698,6 @@ export default function GalaxyCanvas({
     flyToPosRef.current = (x, y, z, dist) => flyTo(new THREE.Vector3(x, y, z), dist);
     flySongRef.current = (index: number) => {
       if (!positions || !payload) return;
-      const theme = payload.themes.find((th) => th.id === payload!.songs.themeId[index]);
-      setSelected({
-        title: payload.songs.title[index],
-        artist: payload.songs.artist[index],
-        genre: theme?.level === 2 ? theme.name : undefined,
-      });
       const p = new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
       if (skyActive && skyStarPos) {
         // 밤하늘 모드: 별 위에 선 채로 그 곡의 돔 위치로 시선만 회전 + 선택 링 표시.
@@ -737,8 +731,15 @@ export default function GalaxyCanvas({
           toTarget: camera.position.clone().addScaledVector(dir, 2),
           start: performance.now(),
         };
-        return;
+        return; // 행성에서는 요약 패널 없이 카드 포커스가 정보를 보여준다
       }
+      // 은하 모드: 요약 패널 표시 + 곡으로 비행
+      const theme = payload.themes.find((th) => th.id === payload!.songs.themeId[index]);
+      setSelected({
+        title: payload.songs.title[index],
+        artist: payload.songs.artist[index],
+        genre: theme?.level === 2 ? theme.name : undefined,
+      });
       flyTo(p, 45);
     };
 
