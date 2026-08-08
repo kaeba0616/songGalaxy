@@ -1906,8 +1906,8 @@ export default function GalaxyCanvas({
         >
           <div className="mb-2 px-5">
             {cardsCollapsed && miniSong && (
-              /* 접힌 상태 미니플레이어 — 곡 정보(+좋아요)는 재생 컨트롤 윗줄 */
-              <div className="mb-2 flex min-w-0 items-center gap-3">
+              /* 접힌 상태 미니플레이어 — 곡 정보(+좋아요)는 우측 재생 컨트롤 바로 윗줄 */
+              <div className="mb-2 flex min-w-0 items-center justify-end gap-3">
                 {miniMedia?.artworkUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지, 최적화 프록시 불필요
                   <img
