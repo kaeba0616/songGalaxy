@@ -1805,7 +1805,7 @@ export default function GalaxyCanvas({
         <div
           className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pb-4 pt-8 transition-transform duration-300 ease-out"
           style={{
-            transform: cardsCollapsed ? "translateY(calc(100% - 4.6rem))" : "translateY(0)",
+            transform: cardsCollapsed ? "translateY(calc(100% - 3.75rem))" : "translateY(0)",
           }}
         >
           <div className="mb-2 flex items-center justify-between px-5">
@@ -1858,7 +1858,9 @@ export default function GalaxyCanvas({
               </button>
             </div>
           </div>
-          <div className="relative">
+          <div
+            className={`relative transition-opacity duration-200 ${cardsCollapsed ? "pointer-events-none opacity-0" : "opacity-100"}`}
+          >
             <button
               type="button"
               onClick={() => scrollCards(-1)}
