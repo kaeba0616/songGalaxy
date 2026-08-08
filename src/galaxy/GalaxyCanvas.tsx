@@ -353,7 +353,10 @@ export default function GalaxyCanvas({
       setPlayingId(null);
       return;
     }
-    for (let i = idx + 1; i < cardData.songs.length; i++) {
+    // 다음 곡부터 목록을 한 바퀴 돌며 미리듣기 있는 곡을 찾는다 — 끝나면 첫 곡으로 루프
+    const n = cardData.songs.length;
+    for (let step = 1; step <= n; step++) {
+      const i = (idx + step) % n;
       const song = cardData.songs[i];
       let m: Media | undefined = mediaRef.current[song.id];
       if (!m) {
@@ -369,7 +372,7 @@ export default function GalaxyCanvas({
         return;
       }
     }
-    setPlayingId(null); // 목록 끝 — 자동 재생 종료
+    setPlayingId(null); // 미리듣기 가능한 곡이 하나도 없음
   };
 
   /** 미리듣기 토글 (한 번에 한 곡만, 끝나면 다음 곡 자동 진행) — 같은 곡은 일시정지/재개 */
@@ -396,9 +399,12 @@ export default function GalaxyCanvas({
     async (dir: -1 | 1) => {
       const cardData = cardsRef.current;
       if (!cardData || cardData.songs.length === 0) return;
+      const n = cardData.songs.length;
       const idx = playingId !== null ? cardData.songs.findIndex((s) => s.id === playingId) : -1;
-      let i = idx < 0 ? (dir === 1 ? 0 : cardData.songs.length - 1) : idx + dir;
-      for (; i >= 0 && i < cardData.songs.length; i += dir) {
+      const start = idx < 0 ? (dir === 1 ? 0 : n - 1) : (((idx + dir) % n) + n) % n;
+      // 목록을 순환하며 미리듣기 있는 곡을 찾는다 (끝↔처음 루프)
+      for (let step = 0; step < n; step++) {
+        const i = (((start + dir * step) % n) + n) % n;
         const song = cardData.songs[i];
         let m: Media | undefined = mediaRef.current[song.id];
         if (!m) {
