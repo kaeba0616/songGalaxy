@@ -143,6 +143,8 @@ export default function GalaxyCanvas({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const resetRef = useRef<(() => void) | null>(null);
   const exitSkyRef = useRef<(() => void) | null>(null);
+  /** 특정 유저의 행성으로 착륙 (밤하늘에 있어도 안전하게 이동) */
+  const landByUserRef = useRef<((userId: number) => void) | null>(null);
   const flySongRef = useRef<((index: number) => void) | null>(null);
   const enrichRequested = useRef<Set<number>>(new Set());
   /** 오디오 onended 콜백에서 최신 상태를 읽기 위한 미러 (stale closure 방지) */
@@ -1153,6 +1155,12 @@ export default function GalaxyCanvas({
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
     exitSkyRef.current = exitSky;
+    landByUserRef.current = (uid: number) => {
+      const target = userStars.find((s) => s.data.userId === uid);
+      if (!target) return;
+      if (skyActive) exitSky(); // 다른 행성에 있었다면 정리 후 출발
+      landOnStar(target);
+    };
 
     /** 특정 테마(성단 또는 세부 장르)에 속한 곡 인덱스를 인기순 카드 데이터로 만든다 */
     const collectSongs = (match: (subThemeId: number) => boolean): CardSong[] => {
@@ -1597,6 +1605,17 @@ export default function GalaxyCanvas({
           <button
             type="button"
             onClick={() => {
+              // 행성 모드에서는 은하 좌표 비행이 카메라를 깨뜨리므로(지면 안으로
+              // 빨려 들어감) 착륙 전환으로 동작한다
+              if (skyInfo) {
+                if (authState.userId != null && skyInfo.userId === authState.userId) {
+                  setToast("✦ 지금 내 별 위에 있어요");
+                  setTimeout(() => setToast(null), 2500);
+                } else if (authState.userId != null) {
+                  landByUserRef.current?.(authState.userId);
+                }
+                return;
+              }
               const s = authState.star!;
               flyToPosRef.current?.(s.x, s.y, s.z, 120);
             }}
