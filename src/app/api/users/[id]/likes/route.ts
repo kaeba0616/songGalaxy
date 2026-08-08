@@ -23,7 +23,7 @@ export async function GET(
   }
   const sub = alias(schema.themes, "sub");
   const big = alias(schema.themes, "big");
-  const [rows, clusterRows] = await Promise.all([
+  const [rows, clusterRows, [owner]] = await Promise.all([
     db
       .select({ songId: schema.likes.songId, at: schema.likes.createdAt })
       .from(schema.likes)
@@ -39,12 +39,18 @@ export async function GET(
       .groupBy(big.name)
       .orderBy(sql`count(*) desc`)
       .limit(3),
+    db
+      .select({ bio: schema.users.bio, pinnedSongId: schema.users.pinnedSongId })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId)),
   ]);
   return NextResponse.json(
     {
       songIds: rows.map((r) => r.songId),
       likesCount: rows.length,
       lastLikedAt: rows[0]?.at ?? null,
+      bio: owner?.bio ?? null,
+      pinnedSongId: owner?.pinnedSongId ?? null,
       clusters: clusterRows.map((c) => ({
         slug: c.cluster,
         label: CLUSTER_META.get(c.cluster)?.label ?? c.cluster,

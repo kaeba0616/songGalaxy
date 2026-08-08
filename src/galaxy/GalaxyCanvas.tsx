@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { MIN_LIKES_FOR_STAR } from "@/config/constants";
+import { BIO_MAX, MIN_LIKES_FOR_STAR, NICKNAME_MAX } from "@/config/constants";
 import { getPlanetTheme } from "@/config/planet-themes";
 import { hashString, mulberry32 } from "@/lib/layout-math";
 import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
@@ -57,6 +57,8 @@ interface PlanetInfo {
   likesCount?: number;
   lastLikedAt?: string | null;
   clusters?: { slug: string; label: string; color: string; n: number }[];
+  /** 주인이 쓴 한 줄 소개 (행성 프로필) */
+  bio?: string | null;
 }
 
 interface AuthState {
@@ -196,9 +198,66 @@ export default function GalaxyCanvas({
   const [isPaused, setIsPaused] = useState(false);
   /** 포커스된 카드 (별 클릭·재생 이동으로 가운데 정렬된 곡) — 테두리 강조용 */
   const [focusedCardId, setFocusedCardId] = useState<number | null>(null);
-  /** 우측 상단 프로필 드롭다운 열림 상태 */
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  /** 우측 드로어 (메뉴 + 행성 프로필 편집) 열림 상태 */
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  /** 드로어 프로필 편집 폼 — 열 때 /api/profile에서 로드 */
+  const [profile, setProfile] = useState<{
+    nickname: string;
+    bio: string;
+    pinnedSongId: number | null;
+    likedSongs: { id: number; title: string; artist: string }[];
+  } | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  useEffect(() => {
+    if (!drawerOpen || !authState.authenticated || profile) return;
+    fetch("/api/profile")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (d: {
+          nickname: string;
+          bio: string | null;
+          pinnedSongId: number | null;
+          likedSongs: { id: number; title: string; artist: string }[];
+        } | null) => {
+          if (d) {
+            setProfile({
+              nickname: d.nickname,
+              bio: d.bio ?? "",
+              pinnedSongId: d.pinnedSongId,
+              likedSongs: d.likedSongs,
+            });
+          }
+        },
+      )
+      .catch(() => undefined);
+  }, [drawerOpen, authState.authenticated, profile]);
+  const saveProfile = useCallback(async () => {
+    if (!profile) return;
+    setProfileSaving(true);
+    try {
+      const r = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nickname: profile.nickname,
+          bio: profile.bio,
+          pinnedSongId: profile.pinnedSongId,
+        }),
+      });
+      const d = (await r.json()) as { nickname?: string; error?: string };
+      if (!r.ok) {
+        setToast(`⚠ ${d.error ?? "저장에 실패했어요"}`);
+      } else {
+        setAuthState((prev) => ({ ...prev, nickname: d.nickname }));
+        setToast("✦ 행성 프로필을 저장했어요");
+      }
+    } catch {
+      setToast("⚠ 저장에 실패했어요");
+    } finally {
+      setProfileSaving(false);
+      setTimeout(() => setToast(null), 2500);
+    }
+  }, [profile]);
   /** 좋아요 별 강조(더 크고 밝게) 표시 여부 — localStorage 유지 */
   const [likedGlowOn, setLikedGlowOn] = useState(true);
   /** 씬의 좋아요 별 강조 갱신 API (three 이펙트가 채움) — 빈 배열이면 강조 제거 */
@@ -212,26 +271,6 @@ export default function GalaxyCanvas({
       return !on;
     });
   }, []);
-  // 메뉴 밖 클릭 시 닫기
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDoc = (e: PointerEvent) => {
-      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", onDoc);
-    return () => document.removeEventListener("pointerdown", onDoc);
-  }, [menuOpen]);
-  /** 모바일 햄버거 메뉴 (좁은 화면에서 우측 상단 버튼 전부를 담는다) */
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const mobileMenuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!mobileMenuOpen) return;
-    const onDoc = (e: PointerEvent) => {
-      if (!mobileMenuRef.current?.contains(e.target as Node)) setMobileMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", onDoc);
-    return () => document.removeEventListener("pointerdown", onDoc);
-  }, [mobileMenuOpen]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [songCount, setSongCount] = useState(0);
 
@@ -1266,9 +1305,16 @@ export default function GalaxyCanvas({
             likesCount?: number;
             lastLikedAt?: string | null;
             clusters?: PlanetInfo["clusters"];
+            bio?: string | null;
+            pinnedSongId?: number | null;
           }) => {
             if (pendingSky?.entry === entry) {
-              pendingSky.songIds = d.songIds ?? [];
+              let songIds = d.songIds ?? [];
+              // 대표곡이 있으면 맨 앞으로 — 착륙 라디오가 이 곡부터 시작한다
+              if (d.pinnedSongId != null && songIds.includes(d.pinnedSongId)) {
+                songIds = [d.pinnedSongId, ...songIds.filter((id) => id !== d.pinnedSongId)];
+              }
+              pendingSky.songIds = songIds;
               setSkyInfo((prev) =>
                 prev?.userId === entry.data.userId
                   ? {
@@ -1276,6 +1322,7 @@ export default function GalaxyCanvas({
                       likesCount: d.likesCount,
                       lastLikedAt: d.lastLikedAt,
                       clusters: d.clusters,
+                      bio: d.bio,
                     }
                   : prev,
               );
@@ -1821,6 +1868,7 @@ export default function GalaxyCanvas({
         <div className="pointer-events-none absolute left-4 top-4 max-w-[55%] rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white backdrop-blur sm:max-w-xs">
           <p className="text-[11px] tracking-widest text-white/40">PLANET</p>
           <h1 className="mt-0.5 text-lg font-semibold">✦ {skyInfo.nickname}의 행성</h1>
+          {skyInfo.bio && <p className="mt-1 text-xs italic text-white/60">“{skyInfo.bio}”</p>}
           {skyInfo.likesCount != null && (
             <p className="mt-1 text-xs text-white/55">
               좋아요 {skyInfo.likesCount}곡
@@ -1863,71 +1911,17 @@ export default function GalaxyCanvas({
         </div>
       )}
 
-      {/* 데스크톱 전용 — 모바일에서는 아래 햄버거 메뉴가 대신한다 */}
+      {/* 데스크톱 전용 — 모바일에서는 아래 햄버거 버튼이 대신한다 */}
       <div className="absolute right-4 top-4 z-10 hidden gap-2 sm:flex">
         {authState.authenticated ? (
-          /* 프로필 드롭다운 — 계정 관련 항목을 하나로 묶는다 */
-          <div ref={menuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setMenuOpen((o) => !o)}
-              className="rounded-full border border-amber-200/30 bg-amber-100/10 px-4 py-1.5 text-sm text-amber-100/90 backdrop-blur transition hover:bg-amber-100/20"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-            >
-              ✦ {authState.nickname} ▾
-            </button>
-            {menuOpen && (
-              <div
-                role="menu"
-                className="absolute right-0 top-full z-20 mt-2 w-44 rounded-xl border border-white/15 bg-black/85 p-1.5 backdrop-blur"
-              >
-                {authState.star && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      goMyStar();
-                    }}
-                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
-                  >
-                    ✦ 내 별로 이동
-                  </button>
-                )}
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={toggleLikedGlow}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-                >
-                  {likedGlowOn ? "🌟 좋아요 별 강조 끄기" : "🌟 좋아요 별 강조 켜기"}
-                </button>
-                <a
-                  role="menuitem"
-                  href="/me"
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-                >
-                  ♥ 내 취향 페이지
-                </a>
-                <a
-                  role="menuitem"
-                  href="/songs"
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-                >
-                  ♪ 곡 목록
-                </a>
-                <div className="my-1 border-t border-white/10" />
-                <a
-                  role="menuitem"
-                  href="/api/auth/signout?callbackUrl=/"
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/50 transition hover:bg-white/10 hover:text-white"
-                >
-                  로그아웃
-                </a>
-              </div>
-            )}
-          </div>
+          /* 닉네임 클릭 → 우측 드로어 (메뉴 + 행성 프로필 편집) */
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            className="rounded-full border border-amber-200/30 bg-amber-100/10 px-4 py-1.5 text-sm text-amber-100/90 backdrop-blur transition hover:bg-amber-100/20"
+          >
+            ✦ {authState.nickname}
+          </button>
         ) : (
           <>
             <a
@@ -1974,124 +1968,193 @@ export default function GalaxyCanvas({
         )}
       </div>
 
-      {/* 모바일 햄버거 메뉴 — 우측 상단 버튼 전부를 하나로 */}
-      <div ref={mobileMenuRef} className="absolute right-4 top-4 z-10 sm:hidden">
+      {/* 모바일 — ☰ 버튼 하나로 드로어 열기 */}
+      <div className="absolute right-4 top-4 z-10 sm:hidden">
         <button
           type="button"
-          onClick={() => setMobileMenuOpen((o) => !o)}
+          onClick={() => setDrawerOpen(true)}
           className="rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
-          aria-haspopup="menu"
-          aria-expanded={mobileMenuOpen}
           aria-label="메뉴"
         >
           ☰
         </button>
-        {mobileMenuOpen && (
-          <div
-            role="menu"
-            className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-white/15 bg-black/85 p-1.5 backdrop-blur"
+      </div>
+
+      {/* 우측 드로어 — 메뉴 + 행성 프로필 편집 */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-20 bg-black/50" onClick={() => setDrawerOpen(false)} />
+      )}
+      <aside
+        className={`fixed right-0 top-0 z-30 flex h-dvh w-80 max-w-[85vw] transform flex-col overflow-y-auto border-l border-white/15 bg-black/90 p-5 backdrop-blur transition-transform duration-300 ${drawerOpen ? "translate-x-0" : "translate-x-full"}`}
+        aria-hidden={!drawerOpen}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <p className="text-sm font-semibold text-amber-100/90">
+            {authState.authenticated ? `✦ ${authState.nickname}` : "songGalaxy"}
+          </p>
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(false)}
+            className="rounded-full px-2 text-white/60 transition hover:text-white"
+            aria-label="드로어 닫기"
           >
-            {authState.authenticated ? (
-              <>
-                {authState.star && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMobileMenuOpen(false);
-                      goMyStar();
-                    }}
-                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
+            ✕
+          </button>
+        </div>
+
+        {/* 행성 프로필 편집 (로그인 시) */}
+        {authState.authenticated && (
+          <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-4">
+            <p className="mb-3 text-[11px] tracking-widest text-white/40">행성 프로필</p>
+            {profile ? (
+              <div className="flex flex-col gap-3">
+                <label className="text-xs text-white/60">
+                  닉네임
+                  <input
+                    value={profile.nickname}
+                    maxLength={NICKNAME_MAX}
+                    onChange={(e) => setProfile({ ...profile, nickname: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none transition focus:border-amber-200/50"
+                  />
+                </label>
+                <label className="text-xs text-white/60">
+                  한 줄 소개
+                  <input
+                    value={profile.bio}
+                    maxLength={BIO_MAX}
+                    placeholder="행성 방문자에게 보여줄 소개"
+                    onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-amber-200/50"
+                  />
+                </label>
+                <label className="text-xs text-white/60">
+                  대표곡 <span className="text-white/35">— 행성 라디오가 이 곡부터 시작</span>
+                  <select
+                    value={profile.pinnedSongId ?? ""}
+                    onChange={(e) =>
+                      setProfile({
+                        ...profile,
+                        pinnedSongId: e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-2 py-2 text-sm text-white outline-none transition focus:border-amber-200/50"
                   >
-                    ✦ 내 별로 이동
-                  </button>
-                )}
+                    <option value="">자동 (최근 좋아요 순)</option>
+                    {profile.likedSongs.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.title} — {s.artist}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   type="button"
-                  role="menuitem"
-                  onClick={toggleLikedGlow}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                  onClick={() => void saveProfile()}
+                  disabled={profileSaving}
+                  className="rounded-lg border border-amber-200/40 bg-amber-100/15 px-3 py-2 text-sm text-amber-100 transition hover:bg-amber-100/25 disabled:opacity-50"
                 >
-                  {likedGlowOn ? "🌟 좋아요 별 강조 끄기" : "🌟 좋아요 별 강조 켜기"}
+                  {profileSaving ? "저장 중…" : "저장"}
                 </button>
-                <a
-                  role="menuitem"
-                  href="/me"
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-                >
-                  ♥ 내 취향 페이지
-                </a>
-              </>
+              </div>
             ) : (
-              <a
-                role="menuitem"
-                href="/api/auth/signin?callbackUrl=/"
-                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white transition hover:bg-white/10"
-              >
-                Google 로그인
-              </a>
-            )}
-            <a
-              role="menuitem"
-              href="/songs"
-              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-            >
-              ♪ 곡 목록
-            </a>
-            <div className="my-1 border-t border-white/10" />
-            {skyInfo ? (
-              <>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    copyPlanetLink();
-                  }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-                >
-                  🔗 행성 링크 복사
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    exitSkyRef.current?.();
-                  }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
-                >
-                  은하로 나가기
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  resetRef.current?.();
-                }}
-                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-              >
-                🔭 전체 보기
-              </button>
-            )}
-            {authState.authenticated && (
-              <>
-                <div className="my-1 border-t border-white/10" />
-                <a
-                  role="menuitem"
-                  href="/api/auth/signout?callbackUrl=/"
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/50 transition hover:bg-white/10 hover:text-white"
-                >
-                  로그아웃
-                </a>
-              </>
+              <p className="text-xs text-white/40">불러오는 중…</p>
             )}
           </div>
         )}
-      </div>
+
+        {/* 메뉴 */}
+        <nav className="flex flex-col">
+          {authState.authenticated ? (
+            <>
+              {authState.star && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawerOpen(false);
+                    goMyStar();
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
+                >
+                  ✦ 내 별로 이동
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={toggleLikedGlow}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+              >
+                {likedGlowOn ? "🌟 좋아요 별 강조 끄기" : "🌟 좋아요 별 강조 켜기"}
+              </button>
+              <a
+                href="/me"
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+              >
+                ♥ 내 취향 페이지
+              </a>
+            </>
+          ) : (
+            <a
+              href="/api/auth/signin?callbackUrl=/"
+              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white transition hover:bg-white/10"
+            >
+              Google 로그인
+            </a>
+          )}
+          <a
+            href="/songs"
+            className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+          >
+            ♪ 곡 목록
+          </a>
+          <div className="my-1 border-t border-white/10" />
+          {skyInfo ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setDrawerOpen(false);
+                  copyPlanetLink();
+                }}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+              >
+                🔗 행성 링크 복사
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDrawerOpen(false);
+                  exitSkyRef.current?.();
+                }}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
+              >
+                은하로 나가기
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setDrawerOpen(false);
+                resetRef.current?.();
+              }}
+              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+            >
+              🔭 전체 보기
+            </button>
+          )}
+          {authState.authenticated && (
+            <>
+              <div className="my-1 border-t border-white/10" />
+              <a
+                href="/api/auth/signout?callbackUrl=/"
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/50 transition hover:bg-white/10 hover:text-white"
+              >
+                로그아웃
+              </a>
+            </>
+          )}
+        </nav>
+      </aside>
 
       {/* 착륙 진입 플래시 (금빛 커튼) */}
       <div

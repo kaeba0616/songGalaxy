@@ -19,3 +19,8 @@ export const GALAXY_RADIUS = 1_000;
 export const RECENT_LIKE_WEIGHT = 1.5;
 /** "최근"으로 간주하는 좋아요 개수 */
 export const RECENT_LIKE_WINDOW = 10;
+
+/** 행성 프로필 — 닉네임 최대 길이 */
+export const NICKNAME_MAX = 20;
+/** 행성 프로필 — 한 줄 소개 최대 길이 */
+export const BIO_MAX = 80;

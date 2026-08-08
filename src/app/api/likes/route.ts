@@ -10,11 +10,19 @@ export const dynamic = "force-dynamic";
 export async function GET(): Promise<NextResponse> {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ authenticated: false });
-  const state = await getLikeState(user.id);
+  // 닉네임은 세션 JWT가 아니라 DB가 원본 — 프로필 편집 직후에도 신선하게
+  const [[me], state] = await Promise.all([
+    db
+      .select({ nickname: schema.users.nickname, bio: schema.users.bio })
+      .from(schema.users)
+      .where(eq(schema.users.id, user.id)),
+    getLikeState(user.id),
+  ]);
   return NextResponse.json({
     authenticated: true,
     userId: user.id,
-    nickname: user.nickname,
+    nickname: me?.nickname ?? user.nickname,
+    bio: me?.bio ?? null,
     ...state,
   });
 }

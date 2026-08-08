@@ -87,6 +87,10 @@ export const users = pgTable("users", {
   nickname: text("nickname").notNull(),
   /** 행성 테마 slug — 원본 팔레트는 src/config/planet-themes.ts (SSOT) */
   planetTheme: text("planet_theme"),
+  /** 행성 프로필 한 줄 소개 — 방문자 정보 패널에 보인다 */
+  bio: text("bio"),
+  /** 대표곡(좋아요 중 하나) — 행성 라디오가 이 곡부터 시작 */
+  pinnedSongId: integer("pinned_song_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
