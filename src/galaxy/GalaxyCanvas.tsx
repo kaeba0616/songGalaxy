@@ -712,8 +712,47 @@ export default function GalaxyCanvas({
         };
         return; // 행성에서는 요약 패널 없이 카드 포커스가 정보를 보여준다
       }
-      // 은하 모드: 곡으로 비행 (정보는 카드가 담당)
+      // 은하 모드: 곡으로 비행 + 행성과 동일하게 카드 가운데 포커스
       flyTo(p, 45);
+      const currentCards = cardsRef.current;
+      const inList = currentCards ? currentCards.songs.findIndex((s) => s.index === index) : -1;
+      if (currentCards && inList >= 0) {
+        // 열려 있는 목록에 곡이 있으면 (접혀 있으면 펼치고) 가운데로
+        const wasCollapsed = cardsCollapsedRef.current;
+        if (wasCollapsed) setCardsCollapsed(false);
+        setTimeout(() => scrollToCard(inList), wasCollapsed ? 380 : 0);
+      } else {
+        // 목록이 없거나 다른 목록이면 그 곡의 세부 장르 목록을 열어 포커스
+        const sub = payload.themes.find((t) => t.id === payload!.songs.themeId[index]);
+        const parent =
+          sub?.parentId != null ? payload.themes.find((t) => t.id === sub.parentId) : undefined;
+        if (sub && parent) {
+          let songs = collectSongs((id) => id === sub.id);
+          let k = songs.findIndex((s) => s.index === index);
+          if (k < 0) {
+            // 인기순 150곡 밖의 곡 — 클릭한 곡을 맨 앞에 끼워 항상 보이게
+            songs = [
+              {
+                index,
+                id: payload.songs.id[index],
+                title: payload.songs.title[index],
+                artist: payload.songs.artist[index],
+                popularity: payload.songs.popularity[index],
+              },
+              ...songs,
+            ];
+            k = 0;
+          }
+          setCards({
+            title: sub.label,
+            subtitle: `${parent.label} · ${songs.length}곡`,
+            color: sub.color,
+            songs,
+          });
+          setCardsCollapsed(false);
+          setTimeout(() => scrollToCard(k), 150);
+        }
+      }
     };
 
     // ── 행성 착륙: 그 사람의 밤하늘 (이슈 #9) ─────────────────────────
@@ -1301,27 +1340,8 @@ export default function GalaxyCanvas({
         if (starHit?.index != null && starHit.index < userStars.length) return;
       }
       const hit = raycaster.intersectObject(points)[0];
-      if (hit?.index != null) {
-        const idx = hit.index;
-        playRequestRef.current?.(payload.songs.id[idx]);
-        // 곡이 속한 세부 장르 카드 목록을 열고 해당 곡 카드에 포커스
-        // (곡으로의 비행은 더블클릭의 첫 클릭이 이미 처리)
-        const sub = payload.themes.find((t) => t.id === payload!.songs.themeId[idx]);
-        const parent =
-          sub?.parentId != null ? payload.themes.find((t) => t.id === sub.parentId) : undefined;
-        if (sub && parent) {
-          const songs = collectSongs((id) => id === sub.id);
-          setCards({
-            title: sub.label,
-            subtitle: `${parent.label} · ${songs.length}곡`,
-            color: sub.color,
-            songs,
-          });
-          setCardsCollapsed(false);
-          const k = songs.findIndex((s) => s.index === idx);
-          if (k >= 0) setTimeout(() => scrollToCard(k), 150);
-        }
-      }
+      // 카드 열기·포커스는 더블클릭의 첫 클릭(flySong)이 이미 처리 — 여기선 재생만
+      if (hit?.index != null) playRequestRef.current?.(payload.songs.id[hit.index]);
     };
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
