@@ -28,4 +28,8 @@ export const env = {
   get youtubeApiKey(): string | null {
     return process.env.YOUTUBE_API_KEY ?? null;
   },
+  /** 선택값 — 설정되어 있으면 Cron 엔드포인트가 Bearer 토큰을 검증 */
+  get cronSecret(): string | null {
+    return process.env.CRON_SECRET ?? null;
+  },
 };

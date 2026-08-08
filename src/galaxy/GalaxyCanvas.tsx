@@ -105,6 +105,7 @@ function makePointsLayer(
 export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const labelLayerRef = useRef<HTMLDivElement>(null);
+  const minimapRef = useRef<HTMLCanvasElement>(null);
   const cardScrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const resetRef = useRef<(() => void) | null>(null);
@@ -218,19 +219,46 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
     resize();
     window.addEventListener("resize", resize);
 
-    // 원경 배경 별 (장식용, 데이터와 무관)
+    // 원경 배경 별 (장식용, 데이터와 무관) — 각자 위상이 다른 반짝임 (#8 미학)
+    let bgStarsMat: THREE.ShaderMaterial | null = null;
     {
       const n = 1600;
       const pos = new Float32Array(n * 3);
+      const phase = new Float32Array(n);
       const rng = () => Math.random() * 2 - 1;
       for (let i = 0; i < n; i++) {
         const v = new THREE.Vector3(rng(), rng(), rng()).normalize().multiplyScalar(7000 + Math.random() * 5000);
         pos.set([v.x, v.y, v.z], i * 3);
+        phase[i] = Math.random() * Math.PI * 2;
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      const mat = new THREE.PointsMaterial({ color: 0x8899bb, size: 2, sizeAttenuation: false, transparent: true, opacity: 0.5 });
-      scene.add(new THREE.Points(geo, mat));
+      geo.setAttribute("aPhase", new THREE.BufferAttribute(phase, 1));
+      bgStarsMat = new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 } },
+        vertexShader: /* glsl */ `
+          attribute float aPhase;
+          varying float vPhase;
+          void main() {
+            vPhase = aPhase;
+            gl_PointSize = 2.2;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform float uTime;
+          varying float vPhase;
+          void main() {
+            vec2 uv = gl_PointCoord - 0.5;
+            if (length(uv) > 0.5) discard;
+            float twinkle = 0.25 + 0.4 * (0.5 + 0.5 * sin(uTime * 1.6 + vPhase));
+            gl_FragColor = vec4(0.62, 0.68, 0.82, twinkle);
+          }
+        `,
+        transparent: true,
+        depthWrite: false,
+      });
+      scene.add(new THREE.Points(geo, bgStarsMat));
     }
 
     // 라벨 DOM 유틸 (onClick이 있으면 클릭 가능한 내비게이션 라벨)
@@ -263,6 +291,46 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
     let payload: GalaxyPayload | null = null;
     let positions: Float32Array | null = null;
     let points: THREE.Points | null = null;
+    let haloMat: THREE.ShaderMaterial | null = null;
+    let minimapClusters: GalaxyTheme[] = [];
+
+    /** 미니맵(XZ 평면 투영): 성단 배치 + 현재 카메라 위치·방향 (#8 길잃음 방지) */
+    const drawMinimap = () => {
+      const canvas = minimapRef.current;
+      if (!canvas || minimapClusters.length === 0) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const size = canvas.width;
+      const half = size / 2;
+      const scale = (half - 10) / 950; // 은하 반경 + 여유
+      ctx.clearRect(0, 0, size, size);
+      // 은하 외곽
+      ctx.beginPath();
+      ctx.arc(half, half, 950 * scale, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      ctx.stroke();
+      // 성단
+      for (const c of minimapClusters) {
+        ctx.beginPath();
+        ctx.arc(half + c.x * scale, half + c.z * scale, Math.max(3, c.radius * scale * 0.8), 0, Math.PI * 2);
+        ctx.fillStyle = `${c.color}55`;
+        ctx.fill();
+      }
+      // 카메라 위치(점) + 바라보는 방향(선)
+      const cx = half + Math.max(-half + 4, Math.min(half - 4, camera.position.x * scale));
+      const cz = half + Math.max(-half + 4, Math.min(half - 4, camera.position.z * scale));
+      const dir = controls.target.clone().sub(camera.position).normalize();
+      ctx.beginPath();
+      ctx.moveTo(cx, cz);
+      ctx.lineTo(cx + dir.x * 12, cz + dir.z * 12);
+      ctx.strokeStyle = "rgba(255,255,255,0.7)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cz, 3, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+    };
 
     // fly-to 애니메이션 상태
     let fly: { fromPos: THREE.Vector3; toPos: THREE.Vector3; fromTarget: THREE.Vector3; toTarget: THREE.Vector3; start: number } | null = null;
@@ -389,7 +457,9 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
         }
         points = makePointsLayer(positions, colors, sizes, 0.95);
         const halo = makePointsLayer(positions, colors, haloSizes, 0.06); // 성운 느낌의 글로우층
+        haloMat = halo.material as THREE.ShaderMaterial;
         scene.add(halo, points);
+        minimapClusters = data.themes.filter((t) => t.level === 1);
 
         for (const t of data.themes) {
           if (t.level === 1) {
@@ -500,6 +570,12 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
         }
       }
 
+      // 미학 폴리시 (#8): 배경 별 반짝임 + 성운 글로우의 느린 숨쉬기
+      const t = now / 1000;
+      if (bgStarsMat) bgStarsMat.uniforms.uTime.value = t;
+      if (haloMat) haloMat.uniforms.uAlpha.value = 0.055 + 0.02 * Math.sin(t * 0.7);
+      if (frame % 10 === 0) drawMinimap();
+
       renderer.render(scene, camera);
       frame++;
     };
@@ -564,10 +640,22 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
       </div>
 
       {status === "loading" && (
-        <div className="absolute inset-0 grid place-items-center text-white/70">
-          은하를 불러오는 중…
+        <div className="absolute inset-0 grid place-items-center">
+          <div className="flex flex-col items-center gap-4 text-white/70">
+            <span className="galaxy-pulse text-3xl">✦</span>
+            <span className="text-sm tracking-widest">은하를 불러오는 중…</span>
+          </div>
         </div>
       )}
+
+      {/* 미니맵 — 성단 배치와 내 위치 (모바일에서는 숨김) */}
+      <canvas
+        ref={minimapRef}
+        width={140}
+        height={140}
+        className="pointer-events-none absolute bottom-4 left-4 hidden rounded-full border border-white/10 bg-black/40 backdrop-blur sm:block"
+      />
+
       {status === "error" && (
         <div className="absolute inset-0 grid place-items-center text-red-300">
           은하 데이터를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.
