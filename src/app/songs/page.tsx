@@ -63,6 +63,30 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
       .from(schema.songs)
       .where(where)
       .orderBy(
+        // 검색 시 정확 일치 > 접두 일치 > 부분 일치 순으로 먼저 — "ado" 검색이면
+        // 가수 Ado가 Nelly Furtado보다 위에 온다. 그 안에서 선택한 정렬 적용.
+        ...(q
+          ? (() => {
+              const exact = q.toLowerCase();
+              const prefix = `${exact}%`;
+              if (field === "artist") {
+                return [
+                  sql`(lower(${schema.songs.artist}) = ${exact}) DESC`,
+                  sql`(lower(${schema.songs.artist}) LIKE ${prefix}) DESC`,
+                ];
+              }
+              if (field === "title") {
+                return [
+                  sql`(lower(${schema.songs.title}) = ${exact}) DESC`,
+                  sql`(lower(${schema.songs.title}) LIKE ${prefix}) DESC`,
+                ];
+              }
+              return [
+                sql`(lower(${schema.songs.title}) = ${exact} OR lower(${schema.songs.artist}) = ${exact}) DESC`,
+                sql`(lower(${schema.songs.title}) LIKE ${prefix} OR lower(${schema.songs.artist}) LIKE ${prefix}) DESC`,
+              ];
+            })()
+          : []),
         ...(sort === "title"
           ? [asc(schema.songs.title)]
           : sort === "recent"
