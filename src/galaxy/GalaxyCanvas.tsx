@@ -221,6 +221,17 @@ export default function GalaxyCanvas({
     document.addEventListener("pointerdown", onDoc);
     return () => document.removeEventListener("pointerdown", onDoc);
   }, [menuOpen]);
+  /** 모바일 햄버거 메뉴 (좁은 화면에서 우측 상단 버튼 전부를 담는다) */
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onDoc = (e: PointerEvent) => {
+      if (!mobileMenuRef.current?.contains(e.target as Node)) setMobileMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onDoc);
+    return () => document.removeEventListener("pointerdown", onDoc);
+  }, [mobileMenuOpen]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [songCount, setSongCount] = useState(0);
 
@@ -473,6 +484,32 @@ export default function GalaxyCanvas({
   useEffect(() => {
     likedGlowApiRef.current?.(likedGlowOn ? [...authState.likedIds] : []);
   }, [authState.likedIds, likedGlowOn, status]);
+
+  /** 내 별로 이동 — 행성 모드에서는 은하 좌표 비행이 카메라를 깨뜨리므로 착륙 전환으로 동작 */
+  const goMyStar = useCallback(() => {
+    if (skyInfo) {
+      if (authState.userId != null && skyInfo.userId === authState.userId) {
+        setToast("✦ 지금 내 별 위에 있어요");
+        setTimeout(() => setToast(null), 2500);
+      } else if (authState.userId != null) {
+        landByUserRef.current?.(authState.userId);
+      }
+      return;
+    }
+    const s = authState.star;
+    if (s) flyToPosRef.current?.(s.x, s.y, s.z, 120);
+  }, [skyInfo, authState.userId, authState.star]);
+
+  /** 행성 링크 복사 */
+  const copyPlanetLink = useCallback(() => {
+    if (!skyInfo) return;
+    void navigator.clipboard
+      .writeText(`${window.location.origin}/planet/${skyInfo.userId}`)
+      .then(() => {
+        setToast("🔗 행성 링크를 복사했어요");
+        setTimeout(() => setToast(null), 3000);
+      });
+  }, [skyInfo]);
 
   /** 좋아요 토글 — 비로그인이면 로그인으로, 별 탄생/이동은 씬에 즉시 반영 (D6·D7) */
   const toggleLike = useCallback(
@@ -1820,8 +1857,8 @@ export default function GalaxyCanvas({
         </div>
       )}
 
-      {/* 모바일: 좁은 화면에서는 오른쪽 정렬로 줄바꿈해 타이틀과 겹치지 않게 */}
-      <div className="absolute right-4 top-4 z-10 flex max-w-[60%] flex-wrap justify-end gap-2 sm:max-w-none">
+      {/* 데스크톱 전용 — 모바일에서는 아래 햄버거 메뉴가 대신한다 */}
+      <div className="absolute right-4 top-4 z-10 hidden gap-2 sm:flex">
         {authState.authenticated ? (
           /* 프로필 드롭다운 — 계정 관련 항목을 하나로 묶는다 */
           <div ref={menuRef} className="relative">
@@ -1845,19 +1882,7 @@ export default function GalaxyCanvas({
                     role="menuitem"
                     onClick={() => {
                       setMenuOpen(false);
-                      // 행성 모드에서는 은하 좌표 비행이 카메라를 깨뜨리므로(지면 안으로
-                      // 빨려 들어감) 착륙 전환으로 동작한다
-                      if (skyInfo) {
-                        if (authState.userId != null && skyInfo.userId === authState.userId) {
-                          setToast("✦ 지금 내 별 위에 있어요");
-                          setTimeout(() => setToast(null), 2500);
-                        } else if (authState.userId != null) {
-                          landByUserRef.current?.(authState.userId);
-                        }
-                        return;
-                      }
-                      const s = authState.star!;
-                      flyToPosRef.current?.(s.x, s.y, s.z, 120);
+                      goMyStar();
                     }}
                     className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
                   >
@@ -1917,14 +1942,7 @@ export default function GalaxyCanvas({
           <>
             <button
               type="button"
-              onClick={() => {
-                void navigator.clipboard
-                  .writeText(`${window.location.origin}/planet/${skyInfo.userId}`)
-                  .then(() => {
-                    setToast("🔗 행성 링크를 복사했어요");
-                    setTimeout(() => setToast(null), 3000);
-                  });
-              }}
+              onClick={copyPlanetLink}
               className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
               aria-label="행성 링크 복사"
               title="행성 링크 복사"
@@ -1947,6 +1965,125 @@ export default function GalaxyCanvas({
           >
             전체 보기
           </button>
+        )}
+      </div>
+
+      {/* 모바일 햄버거 메뉴 — 우측 상단 버튼 전부를 하나로 */}
+      <div ref={mobileMenuRef} className="absolute right-4 top-4 z-10 sm:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen((o) => !o)}
+          className="rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
+          aria-haspopup="menu"
+          aria-expanded={mobileMenuOpen}
+          aria-label="메뉴"
+        >
+          ☰
+        </button>
+        {mobileMenuOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-white/15 bg-black/85 p-1.5 backdrop-blur"
+          >
+            {authState.authenticated ? (
+              <>
+                {authState.star && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      goMyStar();
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
+                  >
+                    ✦ 내 별로 이동
+                  </button>
+                )}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={toggleLikedGlow}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                >
+                  {likedGlowOn ? "🌟 좋아요 별 강조 끄기" : "🌟 좋아요 별 강조 켜기"}
+                </button>
+                <a
+                  role="menuitem"
+                  href="/me"
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                >
+                  ♥ 내 취향 페이지
+                </a>
+              </>
+            ) : (
+              <a
+                role="menuitem"
+                href="/api/auth/signin?callbackUrl=/"
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white transition hover:bg-white/10"
+              >
+                Google 로그인
+              </a>
+            )}
+            <a
+              role="menuitem"
+              href="/songs"
+              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+            >
+              ♪ 곡 목록
+            </a>
+            <div className="my-1 border-t border-white/10" />
+            {skyInfo ? (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    copyPlanetLink();
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                >
+                  🔗 행성 링크 복사
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    exitSkyRef.current?.();
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
+                >
+                  은하로 나가기
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  resetRef.current?.();
+                }}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+              >
+                🔭 전체 보기
+              </button>
+            )}
+            {authState.authenticated && (
+              <>
+                <div className="my-1 border-t border-white/10" />
+                <a
+                  role="menuitem"
+                  href="/api/auth/signout?callbackUrl=/"
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/50 transition hover:bg-white/10 hover:text-white"
+                >
+                  로그아웃
+                </a>
+              </>
+            )}
+          </div>
         )}
       </div>
 
