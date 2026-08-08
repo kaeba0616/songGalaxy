@@ -2076,7 +2076,7 @@ export default function GalaxyCanvas({
             <button
               type="button"
               onClick={() => scrollCards(-1)}
-              className="absolute left-1 top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/20 bg-black/60 px-2.5 py-1.5 text-white/80 backdrop-blur transition hover:bg-black/80"
+              className="absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/20 bg-black/60 px-2.5 py-1.5 text-white/80 backdrop-blur transition hover:bg-black/80"
               aria-label="이전 곡들"
             >
               ‹
@@ -2084,7 +2084,7 @@ export default function GalaxyCanvas({
             <div
               ref={cardScrollRef}
               onScroll={onCardScroll}
-              className="scrollbar-none flex snap-x gap-3 overflow-x-auto scroll-smooth px-10"
+              className="scrollbar-none flex snap-x gap-3 overflow-x-auto scroll-smooth px-16 scroll-px-16"
             >
               {cards.songs.map((song) => {
                 const m = media[song.id];
@@ -2158,7 +2158,7 @@ export default function GalaxyCanvas({
             <button
               type="button"
               onClick={() => scrollCards(1)}
-              className="absolute right-1 top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/20 bg-black/60 px-2.5 py-1.5 text-white/80 backdrop-blur transition hover:bg-black/80"
+              className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/20 bg-black/60 px-2.5 py-1.5 text-white/80 backdrop-blur transition hover:bg-black/80"
               aria-label="다음 곡들"
             >
               ›
