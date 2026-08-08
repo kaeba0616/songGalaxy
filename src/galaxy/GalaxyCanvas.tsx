@@ -165,6 +165,28 @@ export default function GalaxyCanvas({
   /** 자동 라디오가 브라우저 정책에 막혔을 때 폴백 버튼 표시 */
   const [radioBlocked, setRadioBlocked] = useState(false);
   const autoRadioTried = useRef(false);
+  /** 미리듣기·라디오 볼륨 (localStorage에 유지) */
+  const [volume, setVolume] = useState(0.8);
+  const volumeRef = useRef(0.8);
+  const lastAudibleVolume = useRef(0.8);
+
+  useEffect(() => {
+    const raw = localStorage.getItem("songgalaxy-volume");
+    const saved = raw === null ? NaN : Number(raw);
+    if (!Number.isNaN(saved) && saved >= 0 && saved <= 1) {
+      setVolume(saved);
+      volumeRef.current = saved;
+      if (saved > 0) lastAudibleVolume.current = saved;
+    }
+  }, []);
+
+  const changeVolume = useCallback((v: number) => {
+    setVolume(v);
+    volumeRef.current = v;
+    if (v > 0) lastAudibleVolume.current = v;
+    if (audioRef.current) audioRef.current.volume = v;
+    localStorage.setItem("songgalaxy-volume", String(v));
+  }, []);
   const [selected, setSelected] = useState<SelectedSong | null>(null);
   const [artistInfo, setArtistInfo] = useState<ArtistInfo | null>(null);
   const [cards, setCards] = useState<CardData | null>(null);
@@ -225,9 +247,9 @@ export default function GalaxyCanvas({
   const playSong = useCallback((songId: number, previewUrl: string): Promise<void> => {
     if (!audioRef.current) {
       audioRef.current = new Audio();
-      audioRef.current.volume = 0.8;
     }
     const audio = audioRef.current;
+    audio.volume = volumeRef.current;
     audio.src = previewUrl;
     audio.onended = () => void playNextRef.current(songId);
     setPlayingId(songId);
@@ -1731,14 +1753,38 @@ export default function GalaxyCanvas({
               </span>
               <span className="ml-2 text-white/50">{cards.subtitle}</span>
             </p>
-            <button
-              type="button"
-              onClick={() => setCards(null)}
-              className="rounded-full px-2 text-white/60 transition hover:text-white"
-              aria-label="곡 목록 닫기"
-            >
-              ✕
-            </button>
+            <div className="flex items-center gap-3">
+              {/* 볼륨 조절 (미리듣기·라디오) */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => changeVolume(volume > 0 ? 0 : lastAudibleVolume.current)}
+                  className="text-sm text-white/70 transition hover:text-white"
+                  aria-label={volume > 0 ? "음소거" : "음소거 해제"}
+                  title={volume > 0 ? "음소거" : "음소거 해제"}
+                >
+                  {volume === 0 ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={volume}
+                  onChange={(e) => changeVolume(Number(e.target.value))}
+                  className="h-1 w-20 cursor-pointer accent-amber-200"
+                  aria-label="볼륨"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setCards(null)}
+                className="rounded-full px-2 text-white/60 transition hover:text-white"
+                aria-label="곡 목록 닫기"
+              >
+                ✕
+              </button>
+            </div>
           </div>
           <div className="relative">
             <button
