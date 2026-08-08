@@ -111,6 +111,9 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
   const resetRef = useRef<(() => void) | null>(null);
   const flySongRef = useRef<((index: number) => void) | null>(null);
   const enrichRequested = useRef<Set<number>>(new Set());
+  /** 오디오 onended 콜백에서 최신 상태를 읽기 위한 미러 (stale closure 방지) */
+  const mediaRef = useRef<Record<number, Media>>({});
+  const cardsRef = useRef<CardData | null>(null);
   const [selected, setSelected] = useState<SelectedSong | null>(null);
   const [artistInfo, setArtistInfo] = useState<ArtistInfo | null>(null);
   const [cards, setCards] = useState<CardData | null>(null);
@@ -119,19 +122,24 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [songCount, setSongCount] = useState(0);
 
-  /** 곡 id 목록의 앨범아트/미리듣기를 서버 캐시에서 가져온다 (중복 요청 방지) */
-  const enrich = useCallback((ids: number[]) => {
+  /** 곡 id 목록의 앨범아트/미리듣기를 서버 캐시에서 가져온다 (중복 요청 방지, await 가능) */
+  const fetchMedia = useCallback(async (ids: number[]): Promise<void> => {
     const fresh = ids.filter((id) => !enrichRequested.current.has(id)).slice(0, ENRICH_BATCH);
     if (fresh.length === 0) return;
     fresh.forEach((id) => enrichRequested.current.add(id));
-    fetch("/api/enrich", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: fresh }),
-    })
-      .then((r) => (r.ok ? r.json() : {}))
-      .then((data: Record<number, Media>) => setMedia((prev) => ({ ...prev, ...data })))
-      .catch(() => fresh.forEach((id) => enrichRequested.current.delete(id)));
+    try {
+      const r = await fetch("/api/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: fresh }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = (await r.json()) as Record<number, Media>;
+      mediaRef.current = { ...mediaRef.current, ...data };
+      setMedia((prev) => ({ ...prev, ...data }));
+    } catch {
+      fresh.forEach((id) => enrichRequested.current.delete(id));
+    }
   }, []);
 
   /** 카드 스크롤 시 화면에 들어온 카드들을 보강 */
@@ -141,27 +149,81 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
     const cardWidth = 172; // w-40(160px) + gap 12px
     const first = Math.max(0, Math.floor(el.scrollLeft / cardWidth) - 1);
     const visible = cards.songs.slice(first, first + ENRICH_BATCH).map((s) => s.id);
-    enrich(visible);
-  }, [cards, enrich]);
+    void fetchMedia(visible);
+  }, [cards, fetchMedia]);
 
-  /** 미리듣기 토글 (한 번에 한 곡만) */
-  const togglePreview = useCallback((songId: number, previewUrl: string) => {
+  /** 재생 중인 카드가 보이도록 캐러셀 스크롤 */
+  const scrollToCard = useCallback((index: number) => {
+    const el = cardScrollRef.current?.children[index] as HTMLElement | undefined;
+    el?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, []);
+
+  /** 미리듣기가 끝나면 다음 곡으로 자동 진행 (미리듣기 없는 곡은 건너뜀) */
+  const playNextRef = useRef<(afterId: number) => Promise<void>>(async () => {});
+
+  const playSong = useCallback((songId: number, previewUrl: string) => {
     if (!audioRef.current) {
       audioRef.current = new Audio();
       audioRef.current.volume = 0.8;
     }
     const audio = audioRef.current;
-    setPlayingId((current) => {
-      if (current === songId) {
-        audio.pause();
-        return null;
-      }
-      audio.src = previewUrl;
-      void audio.play();
-      audio.onended = () => setPlayingId(null);
-      return songId;
-    });
+    audio.src = previewUrl;
+    void audio.play();
+    audio.onended = () => void playNextRef.current(songId);
+    setPlayingId(songId);
   }, []);
+
+  playNextRef.current = async (afterId: number) => {
+    const cardData = cardsRef.current;
+    if (!cardData) {
+      setPlayingId(null);
+      return;
+    }
+    const idx = cardData.songs.findIndex((s) => s.id === afterId);
+    if (idx < 0) {
+      setPlayingId(null);
+      return;
+    }
+    for (let i = idx + 1; i < cardData.songs.length; i++) {
+      const song = cardData.songs[i];
+      let m: Media | undefined = mediaRef.current[song.id];
+      if (!m) {
+        // 다음 곡들의 미리듣기 URL을 그 자리에서 로드
+        await fetchMedia(cardData.songs.slice(i, i + ENRICH_BATCH).map((s) => s.id));
+        m = mediaRef.current[song.id];
+      }
+      // 대기 중 카드 목록이 바뀌었으면 진행 중단
+      if (cardsRef.current !== cardData) return;
+      if (m?.previewUrl) {
+        scrollToCard(i);
+        playSong(song.id, m.previewUrl);
+        return;
+      }
+    }
+    setPlayingId(null); // 목록 끝 — 자동 재생 종료
+  };
+
+  /** 미리듣기 토글 (한 번에 한 곡만, 끝나면 다음 곡 자동 재생) */
+  const togglePreview = useCallback(
+    (songId: number, previewUrl: string) => {
+      if (playingId === songId) {
+        audioRef.current?.pause();
+        setPlayingId(null);
+        return;
+      }
+      playSong(songId, previewUrl);
+    },
+    [playingId, playSong],
+  );
+
+  // 카드 목록 미러 + 카드가 닫히면 재생도 정지
+  useEffect(() => {
+    cardsRef.current = cards;
+    if (!cards) {
+      audioRef.current?.pause();
+      setPlayingId(null);
+    }
+  }, [cards]);
 
   // 곡 선택 시 가수 정보 조회 (MusicBrainz 캐시)
   useEffect(() => {
@@ -183,8 +245,8 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
 
   // 카드가 열리면 첫 배치 보강
   useEffect(() => {
-    if (cards) enrich(cards.songs.slice(0, ENRICH_BATCH).map((s) => s.id));
-  }, [cards, enrich]);
+    if (cards) void fetchMedia(cards.songs.slice(0, ENRICH_BATCH).map((s) => s.id));
+  }, [cards, fetchMedia]);
 
   useEffect(() => {
     const container = containerRef.current;
