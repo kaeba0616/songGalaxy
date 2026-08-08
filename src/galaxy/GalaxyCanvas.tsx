@@ -199,6 +199,21 @@ export default function GalaxyCanvas({
   /** 우측 상단 프로필 드롭다운 열림 상태 */
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  /** 별자리 선(내 별 ↔ 좋아요 곡) 표시 여부 — localStorage 유지 */
+  const [constellationOn, setConstellationOn] = useState(true);
+  /** 씬의 별자리 선 갱신 API (three 이펙트가 채움) — null star면 선 제거 */
+  const constellationApiRef = useRef<
+    ((star: { x: number; y: number; z: number } | null, likedIds: number[]) => void) | null
+  >(null);
+  useEffect(() => {
+    if (localStorage.getItem("songgalaxy-constellation") === "off") setConstellationOn(false);
+  }, []);
+  const toggleConstellation = useCallback(() => {
+    setConstellationOn((on) => {
+      localStorage.setItem("songgalaxy-constellation", on ? "off" : "on");
+      return !on;
+    });
+  }, []);
   // 메뉴 밖 클릭 시 닫기
   useEffect(() => {
     if (!menuOpen) return;
@@ -455,6 +470,14 @@ export default function GalaxyCanvas({
       )
       .catch(() => undefined);
   }, [focusMyStar]);
+
+  // 별자리 선 동기화 — 내 별·좋아요 목록·토글이 바뀌거나 씬이 준비되면 다시 그린다
+  useEffect(() => {
+    constellationApiRef.current?.(
+      constellationOn ? authState.star : null,
+      [...authState.likedIds],
+    );
+  }, [authState.star, authState.likedIds, constellationOn, status]);
 
   /** 좋아요 토글 — 비로그인이면 로그인으로, 별 탄생/이동은 씬에 즉시 반영 (D6·D7) */
   const toggleLike = useCallback(
@@ -752,6 +775,39 @@ export default function GalaxyCanvas({
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
     flyToPosRef.current = (x, y, z, dist) => flyTo(new THREE.Vector3(x, y, z), dist);
+
+    // ── 별자리 선: 내 별 ↔ 좋아요 곡들 (금빛 반투명, 은하 모드 전용) ──
+    let constellation: THREE.LineSegments | null = null;
+    let songIndexById: Map<number, number> | null = null;
+    constellationApiRef.current = (star, likedIds) => {
+      if (constellation) {
+        scene.remove(constellation);
+        constellation.geometry.dispose();
+        (constellation.material as THREE.Material).dispose();
+        constellation = null;
+      }
+      if (!star || !positions || !songIndexById || likedIds.length === 0) return;
+      const verts: number[] = [];
+      for (const id of likedIds) {
+        const i = songIndexById.get(id);
+        if (i == null) continue;
+        verts.push(star.x, star.y, star.z, positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+      }
+      if (verts.length === 0) return;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+      constellation = new THREE.LineSegments(
+        geo,
+        new THREE.LineBasicMaterial({
+          color: 0xffe2a8,
+          transparent: true,
+          opacity: 0.3,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      scene.add(constellation);
+    };
     flySongRef.current = (index: number) => {
       if (!positions || !payload) return;
       const p = new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
@@ -1449,6 +1505,7 @@ export default function GalaxyCanvas({
         const n = data.songs.id.length;
         setSongCount(n);
         positions = new Float32Array(data.songs.pos);
+        songIndexById = new Map(data.songs.id.map((id, i) => [id, i]));
         const colors = new Float32Array(n * 3);
         const sizes = new Float32Array(n);
         const haloSizes = new Float32Array(n);
@@ -1600,6 +1657,9 @@ export default function GalaxyCanvas({
           placeLabel(slot.el, p, 1 - d / SONG_LABEL_DISTANCE);
         }
       }
+
+      // 별자리 선은 은하 모드에서만 (밤하늘·착륙 연출 중 숨김)
+      if (constellation) constellation.visible = !skyActive && !pendingSky;
 
       // 미학 폴리시 (#8): 배경 별 반짝임 + 성운 글로우의 느린 숨쉬기
       const t = now / 1000;
@@ -1808,6 +1868,16 @@ export default function GalaxyCanvas({
                     className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
                   >
                     ✦ 내 별로 이동
+                  </button>
+                )}
+                {authState.star && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={toggleConstellation}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                  >
+                    {constellationOn ? "🌠 별자리 숨기기" : "🌠 별자리 보이기"}
                   </button>
                 )}
                 <a
