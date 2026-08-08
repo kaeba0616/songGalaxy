@@ -196,6 +196,18 @@ export default function GalaxyCanvas({
   const [isPaused, setIsPaused] = useState(false);
   /** 포커스된 카드 (별 클릭·재생 이동으로 가운데 정렬된 곡) — 테두리 강조용 */
   const [focusedCardId, setFocusedCardId] = useState<number | null>(null);
+  /** 우측 상단 프로필 드롭다운 열림 상태 */
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // 메뉴 밖 클릭 시 닫기
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: PointerEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onDoc);
+    return () => document.removeEventListener("pointerdown", onDoc);
+  }, [menuOpen]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [songCount, setSongCount] = useState(0);
 
@@ -1755,61 +1767,90 @@ export default function GalaxyCanvas({
         </div>
       )}
 
-      <div className="absolute right-4 top-4 flex gap-2">
-        {authState.star && (
-          <button
-            type="button"
-            onClick={() => {
-              // 행성 모드에서는 은하 좌표 비행이 카메라를 깨뜨리므로(지면 안으로
-              // 빨려 들어감) 착륙 전환으로 동작한다
-              if (skyInfo) {
-                if (authState.userId != null && skyInfo.userId === authState.userId) {
-                  setToast("✦ 지금 내 별 위에 있어요");
-                  setTimeout(() => setToast(null), 2500);
-                } else if (authState.userId != null) {
-                  landByUserRef.current?.(authState.userId);
-                }
-                return;
-              }
-              const s = authState.star!;
-              flyToPosRef.current?.(s.x, s.y, s.z, 120);
-            }}
-            className="rounded-full border border-amber-200/40 bg-amber-100/15 px-4 py-1.5 text-sm text-amber-100 backdrop-blur transition hover:bg-amber-100/25"
-            title="내 별로 이동"
-          >
-            ✦ 내 별
-          </button>
-        )}
+      <div className="absolute right-4 top-4 z-10 flex gap-2">
         {authState.authenticated ? (
+          /* 프로필 드롭다운 — 계정 관련 항목을 하나로 묶는다 */
+          <div ref={menuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              className="rounded-full border border-amber-200/30 bg-amber-100/10 px-4 py-1.5 text-sm text-amber-100/90 backdrop-blur transition hover:bg-amber-100/20"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+            >
+              ✦ {authState.nickname} ▾
+            </button>
+            {menuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-20 mt-2 w-44 rounded-xl border border-white/15 bg-black/85 p-1.5 backdrop-blur"
+              >
+                {authState.star && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      // 행성 모드에서는 은하 좌표 비행이 카메라를 깨뜨리므로(지면 안으로
+                      // 빨려 들어감) 착륙 전환으로 동작한다
+                      if (skyInfo) {
+                        if (authState.userId != null && skyInfo.userId === authState.userId) {
+                          setToast("✦ 지금 내 별 위에 있어요");
+                          setTimeout(() => setToast(null), 2500);
+                        } else if (authState.userId != null) {
+                          landByUserRef.current?.(authState.userId);
+                        }
+                        return;
+                      }
+                      const s = authState.star!;
+                      flyToPosRef.current?.(s.x, s.y, s.z, 120);
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
+                  >
+                    ✦ 내 별로 이동
+                  </button>
+                )}
+                <a
+                  role="menuitem"
+                  href="/me"
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                >
+                  ♥ 내 취향 페이지
+                </a>
+                <a
+                  role="menuitem"
+                  href="/songs"
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                >
+                  ♪ 곡 목록
+                </a>
+                <div className="my-1 border-t border-white/10" />
+                <a
+                  role="menuitem"
+                  href="/api/auth/signout?callbackUrl=/"
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/50 transition hover:bg-white/10 hover:text-white"
+                >
+                  로그아웃
+                </a>
+              </div>
+            )}
+          </div>
+        ) : (
           <>
             <a
-              href="/me"
-              className="rounded-full border border-amber-200/30 bg-amber-100/10 px-4 py-1.5 text-sm text-amber-100/90 backdrop-blur transition hover:bg-amber-100/20"
-              title="내 취향 페이지"
+              href="/api/auth/signin?callbackUrl=/"
+              className="rounded-full border border-white/25 bg-white/15 px-4 py-1.5 text-sm text-white backdrop-blur transition hover:bg-white/25"
             >
-              ✦ {authState.nickname}
+              Google 로그인
             </a>
             <a
-              href="/api/auth/signout?callbackUrl=/"
-              className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-white/60 backdrop-blur transition hover:bg-white/20"
+              href="/songs"
+              className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
             >
-              로그아웃
+              곡 목록
             </a>
           </>
-        ) : (
-          <a
-            href="/api/auth/signin?callbackUrl=/"
-            className="rounded-full border border-white/25 bg-white/15 px-4 py-1.5 text-sm text-white backdrop-blur transition hover:bg-white/25"
-          >
-            Google 로그인
-          </a>
         )}
-        <a
-          href="/songs"
-          className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
-        >
-          곡 목록
-        </a>
         {skyInfo ? (
           <>
             <button
@@ -1822,9 +1863,11 @@ export default function GalaxyCanvas({
                     setTimeout(() => setToast(null), 3000);
                   });
               }}
-              className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
+              className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
+              aria-label="행성 링크 복사"
+              title="행성 링크 복사"
             >
-              🔗 링크 복사
+              🔗
             </button>
             <button
               type="button"
