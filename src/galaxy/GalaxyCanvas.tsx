@@ -743,6 +743,10 @@ export default function GalaxyCanvas({
       const hPos = new Float32Array(n * 3);
       const hCol = new Float32Array(n * 3);
       const hSize = new Float32Array(n);
+      // 별 색 = 그 곡의 장르(성단) 색 — 밤하늘에서도 취향의 장르 분포가 색으로 보인다
+      const themeById = new Map(payload!.themes.map((th) => [th.id, th]));
+      const songColor = (si: number) => themeById.get(payload!.songs.themeId[si])?.color ?? "#ffdf9e";
+      const tmpColor = new THREE.Color();
       idxs.forEach((si, k) => {
         const frac = n === 1 ? 0.4 : k / (n - 1);
         // 상반구 전체 사용: 최근(k=0)은 정면 눈높이, 오래될수록 천정(정수리) 쪽으로
@@ -756,12 +760,13 @@ export default function GalaxyCanvas({
         );
         skyDomePos!.set(si, p);
         hPos.set([p.x, p.y, p.z], k * 3);
-        hCol.set([1, 0.93, 0.72], k * 3);
+        tmpColor.set(songColor(si));
+        hCol.set([tmpColor.r, tmpColor.g, tmpColor.b], k * 3);
         hSize[k] = 10 + (payload!.songs.popularity[si] / 100) * 5;
       });
       skyGroup.add(makePointsLayer(hPos, hCol, hSize, 1));
       skyLabels = idxs.map((si) => ({
-        el: makeLabel(payload!.songs.title[si], "song sky"),
+        el: makeLabel(payload!.songs.title[si], "song sky", songColor(si)),
         pos: skyDomePos!.get(si)!.clone(),
       }));
 
