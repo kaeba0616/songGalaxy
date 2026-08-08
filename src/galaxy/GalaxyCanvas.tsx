@@ -709,6 +709,7 @@ export default function GalaxyCanvas({
     let skyHighlightIdx: number[] = []; // 포인트 k번째 → songIndex
     let skyRing: THREE.Points | null = null; // 선택된 별 글로우 링 (이슈 #10-4)
     let skyRingMat: THREE.ShaderMaterial | null = null;
+    let skyGroundMat: THREE.ShaderMaterial | null = null; // 발밑 별빛 펄스용
     let hoveredK = -1; // 호버 중인 밤하늘 별 인덱스
     let skyLabels: { el: HTMLDivElement; pos: THREE.Vector3 }[] = [];
     let landingTimers: number[] = [];
@@ -767,8 +768,40 @@ export default function GalaxyCanvas({
       dome.position.copy(C);
       skyGroup.add(dome);
 
-      // 2) 지면 — 작은 행성 위에 선 듯한 곡면 지평선 (테마 색)
-      const groundMat = new THREE.MeshBasicMaterial({ color: planet.ground });
+      // 2) 지면 — 작은 행성 위에 선 듯한 곡면 지평선 (테마 색).
+      // "내가 서 있는 곳이 곧 내 별"이라는 걸 보여주기 위해, 서 있는 지점을
+      // 중심으로 별빛이 배어나오는 글로우를 지면에 그린다 (착륙하면 별이
+      // 사라져 보인다는 피드백 대응 — 별은 없어진 게 아니라 발밑에 있다)
+      const groundMat = new THREE.ShaderMaterial({
+        uniforms: {
+          uGround: { value: new THREE.Color(planet.ground) },
+          uStarGlow: { value: new THREE.Color("#ffd98a") },
+          uCenter: { value: C.clone() },
+          uTime: { value: 0 },
+        },
+        vertexShader: /* glsl */ `
+          varying vec3 vWorld;
+          void main() {
+            vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform vec3 uGround;
+          uniform vec3 uStarGlow;
+          uniform vec3 uCenter;
+          uniform float uTime;
+          varying vec3 vWorld;
+          void main() {
+            float d = distance(vWorld, uCenter);
+            float pulse = 0.85 + 0.15 * sin(uTime * 1.4);
+            // 발밑(별의 심장)에서 배어나오는 별빛 — 멀어질수록 잦아든다
+            vec3 col = uGround + uStarGlow * exp(-d / 60.0) * 0.85 * pulse;
+            gl_FragColor = vec4(col, 1.0);
+          }
+        `,
+      });
+      skyGroundMat = groundMat;
       const ground = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 24), groundMat);
       ground.position.copy(C).addScaledVector(up, -298.5); // 꼭대기가 발밑 ~1.5 아래
       skyGroup.add(ground);
@@ -1068,6 +1101,7 @@ export default function GalaxyCanvas({
       skyHighlightIdx = [];
       skyRing = null;
       skyRingMat = null;
+      skyGroundMat = null;
       hoveredK = -1;
       renderer.domElement.style.cursor = "";
       meteor = null;
@@ -1392,6 +1426,7 @@ export default function GalaxyCanvas({
       if (skyActive) {
         if (skyTwinkleMat) skyTwinkleMat.uniforms.uTime.value = t;
         if (skyRingMat) skyRingMat.uniforms.uTime.value = t;
+        if (skyGroundMat) skyGroundMat.uniforms.uTime.value = t;
         if (meteor && skyStarPos) {
           const m = meteor;
           const mat = m.obj.material as THREE.PointsMaterial;
