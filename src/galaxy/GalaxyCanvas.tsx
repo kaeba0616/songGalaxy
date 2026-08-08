@@ -192,6 +192,16 @@ export default function GalaxyCanvas({
   const [selected, setSelected] = useState<SelectedSong | null>(null);
   const [artistInfo, setArtistInfo] = useState<ArtistInfo | null>(null);
   const [cards, setCards] = useState<CardData | null>(null);
+  /** 카드 목록 접힘 상태 (헤더만 남기고 아래로 슬라이드) */
+  const [cardsCollapsed, setCardsCollapsed] = useState(false);
+  const cardsCollapsedRef = useRef(false);
+  useEffect(() => {
+    cardsCollapsedRef.current = cardsCollapsed;
+  }, [cardsCollapsed]);
+  // 새 목록이 열리면 펼친 상태로 시작
+  useEffect(() => {
+    if (cards) setCardsCollapsed(false);
+  }, [cards]);
   const [media, setMedia] = useState<Record<number, Media>>({});
   const [playingId, setPlayingId] = useState<number | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -696,7 +706,17 @@ export default function GalaxyCanvas({
       });
       const p = new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
       if (skyActive && skyStarPos) {
-        // 밤하늘 모드: 별 위에 선 채로 그 곡의 돔 위치로 시선만 회전 + 선택 링 표시
+        // 밤하늘 모드: 별 위에 선 채로 그 곡의 돔 위치로 시선만 회전 + 선택 링 표시.
+        // 카드 목록이 내려가 있으면 올리고, 해당 곡 카드를 가운데로 포커스
+        const cardData = cardsRef.current;
+        if (cardData) {
+          const k = cardData.songs.findIndex((s) => s.index === index);
+          if (k >= 0) {
+            const wasCollapsed = cardsCollapsedRef.current;
+            if (wasCollapsed) setCardsCollapsed(false);
+            setTimeout(() => scrollToCard(k), wasCollapsed ? 380 : 0);
+          }
+        }
         const domeP = skyDomePos?.get(index) ?? p;
         if (skyRing) {
           (skyRing.geometry.attributes.position as THREE.BufferAttribute).setXYZ(
@@ -1764,7 +1784,12 @@ export default function GalaxyCanvas({
 
       {/* 하단 곡 카드 캐러셀 (성단/세부 장르 클릭 시) */}
       {cards && (
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pb-4 pt-8">
+        <div
+          className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pb-4 pt-8 transition-transform duration-300 ease-out"
+          style={{
+            transform: cardsCollapsed ? "translateY(calc(100% - 4.6rem))" : "translateY(0)",
+          }}
+        >
           <div className="mb-2 flex items-center justify-between px-5">
             <p className="text-sm text-white/90">
               <span className="font-semibold" style={{ color: cards.color }}>
@@ -1773,6 +1798,16 @@ export default function GalaxyCanvas({
               <span className="ml-2 text-white/50">{cards.subtitle}</span>
             </p>
             <div className="flex items-center gap-3">
+              {/* 카드 목록 내리기/올리기 */}
+              <button
+                type="button"
+                onClick={() => setCardsCollapsed((c) => !c)}
+                className="rounded-full border border-white/15 px-2.5 py-0.5 text-xs text-white/70 transition hover:bg-white/10 hover:text-white"
+                aria-label={cardsCollapsed ? "곡 목록 올리기" : "곡 목록 내리기"}
+                title={cardsCollapsed ? "곡 목록 올리기" : "곡 목록 내리기"}
+              >
+                {cardsCollapsed ? "▲" : "▼"}
+              </button>
               {/* 볼륨 조절 (미리듣기·라디오) */}
               <div className="flex items-center gap-1.5">
                 <button
