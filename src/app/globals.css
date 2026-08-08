@@ -85,3 +85,27 @@ body {
   color: #9fb8ff;
   text-shadow: 0 0 18px rgba(159, 184, 255, 0.8);
 }
+
+/* 유저 별 닉네임 라벨 */
+.galaxy-label.star {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #ffe9b8;
+  text-shadow: 0 0 10px rgba(255, 220, 150, 0.9), 0 0 4px rgba(0, 0, 0, 0.9);
+  margin-top: -1.4rem; /* 별 위에 뜨도록 */
+}
+
+/* 별 탄생 토스트 */
+@keyframes galaxy-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+.galaxy-pulse-once {
+  animation: galaxy-toast-in 0.5s ease-out;
+}

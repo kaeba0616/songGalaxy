@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { getSessionUser } from "@/auth";
+import LikeButton from "@/components/LikeButton";
 import { enrichSongs } from "@/server/enrich";
 import { getArtistInfo } from "@/server/artist-info";
 import { getLyrics } from "@/server/lyrics";
@@ -28,11 +30,22 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
     ? await db.select().from(schema.themes).where(eq(schema.themes.id, subTheme.parentId))
     : [undefined];
 
-  const [media, artist, lyrics, videoId] = await Promise.all([
+  const user = await getSessionUser();
+  const [media, artist, lyrics, videoId, [likeCount], myLike] = await Promise.all([
     enrichSongs([songId]).then((m) => m[songId]),
     getArtistInfo(song.artist),
     getLyrics(songId),
     getYoutubeVideoId(songId),
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.likes)
+      .where(eq(schema.likes.songId, songId)),
+    user
+      ? db
+          .select({ songId: schema.likes.songId })
+          .from(schema.likes)
+          .where(and(eq(schema.likes.userId, user.id), eq(schema.likes.songId, songId)))
+      : Promise.resolve([]),
   ]);
 
   const artistLine = [
@@ -75,7 +88,18 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
             )}
           </div>
           <div className="min-w-0">
-            <h1 className="truncate text-2xl font-semibold">{song.title}</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="truncate text-2xl font-semibold">{song.title}</h1>
+              <LikeButton
+                songId={song.id}
+                initialLiked={myLike.length > 0}
+                authenticated={user != null}
+                size="lg"
+              />
+              {likeCount.n > 0 && (
+                <span className="shrink-0 text-sm text-pink-200/70">{likeCount.n}명이 좋아요</span>
+              )}
+            </div>
             <p className="mt-1 truncate text-lg text-white/70">{song.artist}</p>
             {artistLine && <p className="mt-1 truncate text-sm text-white/40">{artistLine}</p>}
             <p className="mt-3 text-sm text-white/50">

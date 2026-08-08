@@ -18,7 +18,17 @@ export interface GalaxyTheme {
   color: string;
 }
 
+/** 은하 주민 — 취향 중심점에 뜬 유저의 별 (D2) */
+export interface GalaxyStar {
+  userId: number;
+  nickname: string;
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface GalaxyPayload {
+  stars: GalaxyStar[];
   songs: {
     id: number[];
     title: string[];

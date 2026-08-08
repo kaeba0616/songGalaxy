@@ -11,7 +11,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { GalaxyPayload, GalaxyTheme } from "./types";
+import { MIN_LIKES_FOR_STAR } from "@/config/constants";
+import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
 
 const GALAXY_BG = "#05060f";
 /** 카메라 초기/리셋 거리 (전체 보기) */
@@ -55,6 +56,14 @@ interface CardData {
 interface Media {
   artworkUrl: string | null;
   previewUrl: string | null;
+}
+
+interface AuthState {
+  authenticated: boolean;
+  userId?: number;
+  nickname?: string;
+  likedIds: Set<number>;
+  likesCount: number;
 }
 
 const CORE_VERTEX = /* glsl */ `
@@ -102,7 +111,13 @@ function makePointsLayer(
   return new THREE.Points(geometry, material);
 }
 
-export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number }) {
+export default function GalaxyCanvas({
+  initialSongId,
+  focusMyStar,
+}: {
+  initialSongId?: number;
+  focusMyStar?: boolean;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const labelLayerRef = useRef<HTMLDivElement>(null);
   const minimapRef = useRef<HTMLCanvasElement>(null);
@@ -114,6 +129,15 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
   /** 오디오 onended 콜백에서 최신 상태를 읽기 위한 미러 (stale closure 방지) */
   const mediaRef = useRef<Record<number, Media>>({});
   const cardsRef = useRef<CardData | null>(null);
+  /** 씬의 유저 별 갱신 API (three 이펙트가 채움) */
+  const starApiRef = useRef<((star: GalaxyStar) => void) | null>(null);
+  const flyToPosRef = useRef<((x: number, y: number, z: number, dist: number) => void) | null>(null);
+  const [authState, setAuthState] = useState<AuthState>({
+    authenticated: false,
+    likedIds: new Set(),
+    likesCount: 0,
+  });
+  const [toast, setToast] = useState<string | null>(null);
   const [selected, setSelected] = useState<SelectedSong | null>(null);
   const [artistInfo, setArtistInfo] = useState<ArtistInfo | null>(null);
   const [cards, setCards] = useState<CardData | null>(null);
@@ -234,6 +258,90 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
       setPlayingId(null);
     }
   }, [cards]);
+
+  // 로그인·좋아요·내 별 상태 로드 (클라이언트 상태의 단일 출처: /api/likes)
+  useEffect(() => {
+    fetch("/api/likes")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (data: {
+          authenticated: boolean;
+          userId?: number;
+          nickname?: string;
+          likedIds?: number[];
+          likesCount?: number;
+          star?: { x: number; y: number; z: number } | null;
+        } | null) => {
+          if (!data) return;
+          setAuthState({
+            authenticated: data.authenticated,
+            userId: data.userId,
+            nickname: data.nickname,
+            likedIds: new Set(data.likedIds ?? []),
+            likesCount: data.likesCount ?? 0,
+          });
+          if (data.star && data.userId != null && focusMyStar) {
+            // /me의 "은하에서 내 별 보기" — 씬 로드 후 비행하도록 약간 지연
+            const s = data.star;
+            setTimeout(() => flyToPosRef.current?.(s.x, s.y, s.z, 120), 1500);
+          }
+        },
+      )
+      .catch(() => undefined);
+  }, [focusMyStar]);
+
+  /** 좋아요 토글 — 비로그인이면 로그인으로, 별 탄생/이동은 씬에 즉시 반영 (D6·D7) */
+  const toggleLike = useCallback(
+    async (songId: number) => {
+      if (!authState.authenticated) {
+        window.location.href = "/api/auth/signin?callbackUrl=/";
+        return;
+      }
+      const liked = !authState.likedIds.has(songId);
+      setAuthState((prev) => {
+        const next = new Set(prev.likedIds);
+        if (liked) next.add(songId);
+        else next.delete(songId);
+        return { ...prev, likedIds: next };
+      });
+      try {
+        const res = await fetch("/api/likes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ songId, liked }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as {
+          likesCount: number;
+          star: { x: number; y: number; z: number } | null;
+          starBorn: boolean;
+        };
+        setAuthState((prev) => ({ ...prev, likesCount: data.likesCount }));
+        if (data.star && authState.userId != null) {
+          starApiRef.current?.({
+            userId: authState.userId,
+            nickname: authState.nickname ?? "나",
+            ...data.star,
+          });
+          if (data.starBorn) {
+            setToast("🌟 내 별이 태어났어요!");
+            const s = data.star;
+            setTimeout(() => flyToPosRef.current?.(s.x, s.y, s.z, 120), 400);
+            setTimeout(() => setToast(null), 4500);
+          }
+        }
+      } catch {
+        // 실패 시 낙관적 반영 롤백
+        setAuthState((prev) => {
+          const next = new Set(prev.likedIds);
+          if (liked) next.delete(songId);
+          else next.add(songId);
+          return { ...prev, likedIds: next };
+        });
+      }
+    },
+    [authState],
+  );
 
   // 곡 선택 시 가수 정보 조회 (MusicBrainz 캐시)
   useEffect(() => {
@@ -404,6 +512,65 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
       ctx.fill();
     };
 
+    // 유저 별 (은하 주민, D2) — 크고 밝은 별 + 닉네임 라벨, 이동은 lerp로 부드럽게 (D6)
+    const STAR_CAP = 64;
+    const starPositions = new Float32Array(STAR_CAP * 3);
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
+    starGeo.setDrawRange(0, 0);
+    const starMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: /* glsl */ `
+        void main() {
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = clamp(2600.0 / -mv.z, 12.0, 72.0);
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        void main() {
+          vec2 uv = gl_PointCoord - 0.5;
+          float d = length(uv);
+          if (d > 0.5) discard;
+          float core = smoothstep(0.14, 0.0, d);
+          float glow = smoothstep(0.5, 0.04, d) * 0.5;
+          float tw = 0.88 + 0.12 * sin(uTime * 2.2);
+          vec3 col = mix(vec3(1.0, 0.84, 0.5), vec3(1.0), core);
+          gl_FragColor = vec4(col, (core + glow) * tw);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    scene.add(new THREE.Points(starGeo, starMat));
+
+    const userStars: {
+      data: GalaxyStar;
+      cur: THREE.Vector3;
+      target: THREE.Vector3;
+      label: HTMLDivElement;
+    }[] = [];
+    const upsertStar = (star: GalaxyStar) => {
+      const target = new THREE.Vector3(star.x, star.y, star.z);
+      const existing = userStars.find((s) => s.data.userId === star.userId);
+      if (existing) {
+        existing.data = star;
+        existing.target.copy(target); // 새 좌표로 부드럽게 이동 (animate에서 lerp)
+        return;
+      }
+      if (userStars.length >= STAR_CAP) return;
+      userStars.push({
+        data: star,
+        cur: target.clone(),
+        target,
+        label: makeLabel(star.nickname, "star"),
+      });
+      starGeo.setDrawRange(0, userStars.length);
+    };
+    starApiRef.current = upsertStar;
+
     // fly-to 애니메이션 상태
     let fly: { fromPos: THREE.Vector3; toPos: THREE.Vector3; fromTarget: THREE.Vector3; toTarget: THREE.Vector3; start: number } | null = null;
     const flyTo = (target: THREE.Vector3, distance: number) => {
@@ -422,6 +589,7 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
       setCards(null);
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
+    flyToPosRef.current = (x, y, z, dist) => flyTo(new THREE.Vector3(x, y, z), dist);
     flySongRef.current = (index: number) => {
       if (!positions || !payload) return;
       setSelected({ title: payload.songs.title[index], artist: payload.songs.artist[index] });
@@ -532,6 +700,8 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
         haloMat = halo.material as THREE.ShaderMaterial;
         scene.add(halo, points);
         minimapClusters = data.themes.filter((t) => t.level === 1);
+        data.stars.forEach(upsertStar); // 은하 주민들
+
 
         for (const t of data.themes) {
           if (t.level === 1) {
@@ -648,6 +818,25 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
       if (haloMat) haloMat.uniforms.uAlpha.value = 0.055 + 0.02 * Math.sin(t * 0.7);
       if (frame % 10 === 0) drawMinimap();
 
+      // 유저 별: 목표 좌표로 부드럽게 이동 + 닉네임 라벨
+      if (userStars.length > 0) {
+        starMat.uniforms.uTime.value = t;
+        for (let i = 0; i < userStars.length; i++) {
+          const s = userStars[i];
+          s.cur.lerp(s.target, 0.045);
+          starPositions[i * 3] = s.cur.x;
+          starPositions[i * 3 + 1] = s.cur.y;
+          starPositions[i * 3 + 2] = s.cur.z;
+        }
+        starGeo.attributes.position.needsUpdate = true;
+        if (frame % 2 === 1) {
+          for (const s of userStars) {
+            const d = camera.position.distanceTo(s.cur);
+            placeLabel(s.label, s.cur, 1.15 - d / 1000);
+          }
+        }
+      }
+
       renderer.render(scene, camera);
       frame++;
     };
@@ -693,9 +882,38 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
         {status === "ready" && (
           <p className="text-xs text-white/50">{songCount.toLocaleString()}곡이 떠 있는 은하 · 장르를 클릭해 들어가보세요</p>
         )}
+        {status === "ready" && authState.authenticated && authState.likesCount < MIN_LIKES_FOR_STAR && (
+          <p className="mt-1 text-xs text-amber-200/90">
+            ✦ 별까지 {MIN_LIKES_FOR_STAR - authState.likesCount}곡 — 좋아하는 곡에 ♥를 눌러보세요
+          </p>
+        )}
       </div>
 
       <div className="absolute right-4 top-4 flex gap-2">
+        {authState.authenticated ? (
+          <>
+            <a
+              href="/me"
+              className="rounded-full border border-amber-200/30 bg-amber-100/10 px-4 py-1.5 text-sm text-amber-100/90 backdrop-blur transition hover:bg-amber-100/20"
+              title="내 취향 페이지"
+            >
+              ✦ {authState.nickname}
+            </a>
+            <a
+              href="/api/auth/signout?callbackUrl=/"
+              className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-white/60 backdrop-blur transition hover:bg-white/20"
+            >
+              로그아웃
+            </a>
+          </>
+        ) : (
+          <a
+            href="/api/auth/signin?callbackUrl=/"
+            className="rounded-full border border-white/25 bg-white/15 px-4 py-1.5 text-sm text-white backdrop-blur transition hover:bg-white/25"
+          >
+            Google 로그인
+          </a>
+        )}
         <a
           href="/songs"
           className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
@@ -710,6 +928,13 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
           전체 보기
         </button>
       </div>
+
+      {/* 별 탄생 등 알림 토스트 */}
+      {toast && (
+        <div className="galaxy-pulse-once absolute left-1/2 top-20 z-10 -translate-x-1/2 rounded-full border border-amber-200/40 bg-black/75 px-6 py-3 text-amber-100 backdrop-blur">
+          {toast}
+        </div>
+      )}
 
       {status === "loading" && (
         <div className="absolute inset-0 grid place-items-center">
@@ -824,6 +1049,15 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
                       </div>
                     </a>
                     <div className="absolute bottom-2 right-2 flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => void toggleLike(song.id)}
+                        className={`grid h-7 w-7 place-items-center rounded-full border text-xs transition ${authState.likedIds.has(song.id) ? "border-pink-400/60 bg-pink-500/25 text-pink-200" : "border-white/20 bg-white/10 text-white/70 hover:bg-white/20"}`}
+                        aria-label={authState.likedIds.has(song.id) ? "좋아요 취소" : "좋아요"}
+                        title={authState.authenticated ? "좋아요" : "로그인하고 좋아요"}
+                      >
+                        {authState.likedIds.has(song.id) ? "♥" : "♡"}
+                      </button>
                       <button
                         type="button"
                         onClick={() => flySongRef.current?.(song.index)}
