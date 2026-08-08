@@ -28,20 +28,6 @@ const CARD_LIMIT = 150;
 /** 한 번에 보강 요청할 카드 수 (/api/enrich의 MAX_IDS와 일치) */
 const ENRICH_BATCH = 12;
 
-interface SelectedSong {
-  title: string;
-  artist: string;
-  /** 가수 동명이인 판별 힌트 */
-  genre?: string;
-}
-
-interface ArtistInfo {
-  type: string | null;
-  country: string | null;
-  beginYear: string | null;
-  tags: string[] | null;
-}
-
 interface CardSong {
   index: number;
   id: number;
@@ -191,8 +177,6 @@ export default function GalaxyCanvas({
     if (audioRef.current) audioRef.current.volume = v;
     localStorage.setItem("songgalaxy-volume", String(v));
   }, []);
-  const [selected, setSelected] = useState<SelectedSong | null>(null);
-  const [artistInfo, setArtistInfo] = useState<ArtistInfo | null>(null);
   const [cards, setCards] = useState<CardData | null>(null);
   /** 카드 목록 접힘 상태 (헤더만 남기고 아래로 슬라이드) */
   const [cardsCollapsed, setCardsCollapsed] = useState(false);
@@ -450,26 +434,6 @@ export default function GalaxyCanvas({
     [authState],
   );
 
-  // 곡 선택 시 가수 정보 조회 (MusicBrainz 캐시)
-  useEffect(() => {
-    setArtistInfo(null);
-    if (!selected) return;
-    let cancelled = false;
-    fetch(
-      `/api/artist?name=${encodeURIComponent(selected.artist)}${selected.genre ? `&genre=${encodeURIComponent(selected.genre)}` : ""}`,
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((info: ArtistInfo | null) => {
-        if (!cancelled && info && (info.type || info.country || info.beginYear)) {
-          setArtistInfo(info);
-        }
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [selected]);
-
   // 카드가 열리면 첫 배치 보강
   useEffect(() => {
     if (cards) void fetchMedia(cards.songs.slice(0, ENRICH_BATCH).map((s) => s.id));
@@ -707,7 +671,6 @@ export default function GalaxyCanvas({
         exitSky();
         return;
       }
-      setSelected(null);
       setCards(null);
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
@@ -749,13 +712,7 @@ export default function GalaxyCanvas({
         };
         return; // 행성에서는 요약 패널 없이 카드 포커스가 정보를 보여준다
       }
-      // 은하 모드: 요약 패널 표시 + 곡으로 비행
-      const theme = payload.themes.find((th) => th.id === payload!.songs.themeId[index]);
-      setSelected({
-        title: payload.songs.title[index],
-        artist: payload.songs.artist[index],
-        genre: theme?.level === 2 ? theme.name : undefined,
-      });
+      // 은하 모드: 곡으로 비행 (정보는 카드가 담당)
       flyTo(p, 45);
     };
 
@@ -1074,7 +1031,6 @@ export default function GalaxyCanvas({
           ? prev
           : { userId: entry.data.userId, nickname: entry.data.nickname },
       );
-      setSelected(null);
     };
 
     /** 착륙 시퀀스: 접근 비행 → 진입 플래시 → 밤하늘 (준비되면 진입, 클릭 시 스킵) */
@@ -1090,7 +1046,6 @@ export default function GalaxyCanvas({
     const landOnStar = (entry: StarEntry) => {
       if (skyActive || pendingSky) return;
       pendingSky = { entry, songIds: null };
-      setSelected(null);
       setCards(null);
       setSkyInfo({ userId: entry.data.userId, nickname: entry.data.nickname });
       // 좋아요 목록·행성 정보는 비행하는 동안 미리 로드
@@ -1188,7 +1143,6 @@ export default function GalaxyCanvas({
       controls.maxPolarAngle = Math.PI;
       setSkyInfo(null);
       setCards(null);
-      setSelected(null);
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
     exitSkyRef.current = exitSky;
@@ -1226,7 +1180,6 @@ export default function GalaxyCanvas({
         payload.themes.filter((t) => t.parentId === cluster.id).map((t) => t.id),
       );
       const songs = collectSongs((id) => childIds.has(id));
-      setSelected(null);
       setCards({
         title: cluster.label,
         subtitle: `성단 전체 인기곡 · ${songs.length}곡`,
@@ -1241,7 +1194,6 @@ export default function GalaxyCanvas({
       if (!payload) return;
       flyTo(new THREE.Vector3(theme.x, theme.y, theme.z), theme.radius * 2.4);
       const songs = collectSongs((id) => id === theme.id);
-      setSelected(null);
       setCards({
         title: theme.label,
         subtitle: `${parent.label} · ${songs.length}곡`,
@@ -1349,7 +1301,27 @@ export default function GalaxyCanvas({
         if (starHit?.index != null && starHit.index < userStars.length) return;
       }
       const hit = raycaster.intersectObject(points)[0];
-      if (hit?.index != null) playRequestRef.current?.(payload.songs.id[hit.index]);
+      if (hit?.index != null) {
+        const idx = hit.index;
+        playRequestRef.current?.(payload.songs.id[idx]);
+        // 곡이 속한 세부 장르 카드 목록을 열고 해당 곡 카드에 포커스
+        // (곡으로의 비행은 더블클릭의 첫 클릭이 이미 처리)
+        const sub = payload.themes.find((t) => t.id === payload!.songs.themeId[idx]);
+        const parent =
+          sub?.parentId != null ? payload.themes.find((t) => t.id === sub.parentId) : undefined;
+        if (sub && parent) {
+          const songs = collectSongs((id) => id === sub.id);
+          setCards({
+            title: sub.label,
+            subtitle: `${parent.label} · ${songs.length}곡`,
+            color: sub.color,
+            songs,
+          });
+          setCardsCollapsed(false);
+          const k = songs.findIndex((s) => s.index === idx);
+          if (k >= 0) setTimeout(() => scrollToCard(k), 150);
+        }
+      }
     };
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
@@ -1805,28 +1777,6 @@ export default function GalaxyCanvas({
       {status === "error" && (
         <div className="absolute inset-0 grid place-items-center text-red-300">
           은하 데이터를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.
-        </div>
-      )}
-
-      {/* 선택된 곡 패널 (카드 캐러셀이 열려 있으면 그 위로 올림) */}
-      {selected && (
-        <div
-          className={`absolute left-1/2 -translate-x-1/2 rounded-xl border border-white/15 bg-black/60 px-5 py-3 text-white backdrop-blur ${cards ? "bottom-64" : "bottom-6"}`}
-        >
-          <p className="max-w-xs truncate text-sm font-medium">{selected.title}</p>
-          <p className="max-w-xs truncate text-xs text-white/60">{selected.artist}</p>
-          {artistInfo && (
-            <p className="mt-1 max-w-xs truncate text-[11px] text-white/40">
-              {[
-                artistInfo.type === "Group" ? "그룹" : artistInfo.type === "Person" ? "솔로" : artistInfo.type,
-                artistInfo.country,
-                artistInfo.beginYear && `${artistInfo.beginYear}~`,
-                artistInfo.tags?.slice(0, 3).join(", "),
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          )}
         </div>
       )}
 
