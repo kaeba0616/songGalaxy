@@ -799,8 +799,10 @@ export default function GalaxyCanvas({
       controls.enableZoom = false;
       controls.enablePan = false;
       controls.rotateSpeed = -0.45;
-      controls.minPolarAngle = 0.02; // 정수리(천정)까지 올려다볼 수 있게
-      controls.maxPolarAngle = Math.PI * 0.62; // 발밑까지 파고들지 않게
+      // 극각은 "타깃 기준 카메라"의 각도라 위를 보려면 카메라가 타깃 아래로 가야 한다(각도↑).
+      // min: 시선이 지평선 아래 -25°까지만 (발밑 방지) / max: 정수리(천정)까지
+      controls.minPolarAngle = Math.PI * 0.36;
+      controls.maxPolarAngle = Math.PI - 0.02;
 
       // 하단 카드: ○○의 밤하늘 (최근 좋아요 순서 유지)
       setCards({
