@@ -145,6 +145,8 @@ export default function GalaxyCanvas({
   const exitSkyRef = useRef<(() => void) | null>(null);
   /** 특정 유저의 행성으로 착륙 (밤하늘에 있어도 안전하게 이동) */
   const landByUserRef = useRef<((userId: number) => void) | null>(null);
+  /** 별 더블클릭 → 해당 곡 미리듣기 재생 요청 (three 이벤트 → React) */
+  const playRequestRef = useRef<((songId: number) => void) | null>(null);
   const flySongRef = useRef<((index: number) => void) | null>(null);
   const enrichRequested = useRef<Set<number>>(new Set());
   /** 오디오 onended 콜백에서 최신 상태를 읽기 위한 미러 (stale closure 방지) */
@@ -296,6 +298,20 @@ export default function GalaxyCanvas({
       setRadioBlocked(false);
     }
   }, [skyInfo, cards, tryRadio]);
+
+  // 별 더블클릭 재생 (미리듣기 URL을 그 자리에서 확보한 뒤 재생)
+  playRequestRef.current = (songId: number) => {
+    void (async () => {
+      await fetchMedia([songId]);
+      const m = mediaRef.current[songId];
+      if (m?.previewUrl) {
+        playSong(songId, m.previewUrl).catch(() => setPlayingId(null));
+      } else {
+        setToast("이 곡은 미리듣기가 제공되지 않아요");
+        setTimeout(() => setToast(null), 2500);
+      }
+    })();
+  };
 
   playNextRef.current = async (afterId: number) => {
     const cardData = cardsRef.current;
@@ -1306,9 +1322,39 @@ export default function GalaxyCanvas({
         renderer.domElement.style.cursor = k >= 0 ? "pointer" : "";
       }
     };
+    // 별 더블클릭 → 해당 곡 재생 (행성의 곡 별, 은하의 곡 점 모두)
+    const onDblClick = (e: MouseEvent) => {
+      if (!payload || !points) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(ndc, camera);
+      if (skyActive) {
+        if (!skyHighlightPoints) return;
+        raycaster.params.Points.threshold = 14;
+        const hit = raycaster.intersectObject(skyHighlightPoints)[0];
+        raycaster.params.Points.threshold = 6;
+        const si = hit?.index != null ? skyHighlightIdx[hit.index] : undefined;
+        if (si != null) playRequestRef.current?.(payload.songs.id[si]);
+        return;
+      }
+      if (pendingSky) return; // 착륙 연출 중이면 무시
+      // 유저 별 더블클릭은 재생 대상이 아님 (첫 클릭에서 이미 착륙 시작)
+      if (userStars.length > 0) {
+        raycaster.params.Points.threshold = 14;
+        const starHit = raycaster.intersectObject(starPoints)[0];
+        raycaster.params.Points.threshold = 6;
+        if (starHit?.index != null && starHit.index < userStars.length) return;
+      }
+      const hit = raycaster.intersectObject(points)[0];
+      if (hit?.index != null) playRequestRef.current?.(payload.songs.id[hit.index]);
+    };
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("pointermove", onPointerMove);
+    renderer.domElement.addEventListener("dblclick", onDblClick);
 
     // 데이터 로드 → 씬 구성
     fetch("/api/galaxy")
@@ -1546,6 +1592,7 @@ export default function GalaxyCanvas({
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
+      renderer.domElement.removeEventListener("dblclick", onDblClick);
       controls.dispose();
       scene.traverse((obj) => {
         if (obj instanceof THREE.Points) {
