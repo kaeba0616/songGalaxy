@@ -617,13 +617,14 @@ export default function GalaxyCanvas({
       setSelected({ title: payload.songs.title[index], artist: payload.songs.artist[index] });
       const p = new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
       if (skyActive && skyStarPos) {
-        // 밤하늘 모드: 별 위에 선 채로 그 곡 방향으로 시선만 회전
-        const dir = p.clone().sub(skyStarPos).normalize();
+        // 밤하늘 모드: 별 위에 선 채로 그 곡의 돔 위치로 시선만 회전
+        const domeP = skyDomePos?.get(index) ?? p;
+        const dir = domeP.clone().sub(camera.position).normalize();
         fly = {
           fromPos: camera.position.clone(),
           toPos: camera.position.clone(),
           fromTarget: controls.target.clone(),
-          toTarget: skyStarPos.clone().addScaledVector(dir, 45),
+          toTarget: camera.position.clone().addScaledVector(dir, 2),
           start: performance.now(),
         };
         return;
@@ -632,59 +633,175 @@ export default function GalaxyCanvas({
     };
 
     // ── 행성 착륙: 그 사람의 밤하늘 (이슈 #9) ─────────────────────────
-    let skyHighlight: THREE.Points | null = null;
+    // 연출 방향: "동물의 숲에서 하늘 보기" — 은하를 통째로 숨기고
+    // 전용 밤하늘 씬(그라데이션 하늘 돔 + 곡면 지평선 + 잔별 + 유성)으로 전환.
+    // 좋아요 곡들은 실제 은하 좌표가 아니라 하늘 돔 위에 보기 좋게 배치한다.
+    let skyGroup: THREE.Group | null = null;
+    let skyTwinkleMat: THREE.ShaderMaterial | null = null; // 잔별 반짝임 시간 갱신용
+    let skyDomePos: Map<number, THREE.Vector3> | null = null; // songIndex → 돔 좌표
     let skyLabels: { el: HTMLDivElement; pos: THREE.Vector3 }[] = [];
     let landingTimers: number[] = [];
     let pendingSky: { entry: StarEntry; songIds: number[] | null } | null = null;
     let flightDone = false;
+    // 유성 (동물의 숲 감성 포인트)
+    let meteor: { obj: THREE.Points; from: THREE.Vector3; to: THREE.Vector3; start: number } | null = null;
+    let meteorNextAt = 0;
 
-    /** 밤하늘 진입 (dim + 하이라이트 + 1인칭 지평선 카메라) */
+    /** 밤하늘 진입 — 전용 스카이돔 씬 구성 */
     const enterSky = (entry: StarEntry, songIds: number[]) => {
       if (!payload || !positions) return;
       skyActive = true;
       skyStarPos = entry.cur.clone();
       fly = null;
-      dimScale = 0.12;
-      if (points) (points.material as THREE.ShaderMaterial).uniforms.uAlpha.value = 0.09;
+      // 은하 씬 통째로 숨김 (복귀 시 visible 복원)
+      scene.children.forEach((o) => (o.visible = false));
 
-      // 최근 좋아요 곡 하이라이트 레이어 + 제목 라벨
-      const idxs = songIds
-        .map((id) => payload!.songs.id.indexOf(id))
-        .filter((i) => i >= 0);
+      const C = skyStarPos;
+      const up = new THREE.Vector3(0, 1, 0);
+      skyGroup = new THREE.Group();
+
+      // 1) 하늘 돔 — 지평선은 옅은 남색, 천정으로 갈수록 깊은 밤 (동물의 숲 야경 톤)
+      const domeMat = new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        vertexShader: /* glsl */ `
+          varying vec3 vDir;
+          void main() {
+            vDir = normalize(position);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          varying vec3 vDir;
+          void main() {
+            float h = clamp(vDir.y, 0.0, 1.0);
+            vec3 horizon = vec3(0.10, 0.16, 0.32);
+            vec3 zenith = vec3(0.012, 0.025, 0.07);
+            gl_FragColor = vec4(mix(horizon, zenith, smoothstep(0.0, 0.55, h)), 1.0);
+          }
+        `,
+      });
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(750, 32, 24), domeMat);
+      dome.position.copy(C);
+      skyGroup.add(dome);
+
+      // 2) 지면 — 작은 행성 위에 선 듯한 곡면 지평선
+      const groundMat = new THREE.MeshBasicMaterial({ color: 0x0a141c });
+      const ground = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 24), groundMat);
+      ground.position.copy(C).addScaledVector(up, -298.5); // 꼭대기가 발밑 ~1.5 아래
+      skyGroup.add(ground);
+
+      // 3) 장식 잔별 900개 — 각자 위상이 다른 반짝임 (배경 별 셰이더와 동일 패턴)
+      {
+        const n = 900;
+        const pos = new Float32Array(n * 3);
+        const phase = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          const azim = Math.random() * Math.PI * 2;
+          const elev = Math.asin(Math.random()); // 위쪽 반구 균일
+          const r = 680;
+          pos[i * 3] = C.x + r * Math.cos(elev) * Math.cos(azim);
+          pos[i * 3 + 1] = C.y + r * Math.sin(elev) * 0.98 + 6;
+          pos[i * 3 + 2] = C.z + r * Math.cos(elev) * Math.sin(azim);
+          phase[i] = Math.random() * Math.PI * 2;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute("aPhase", new THREE.BufferAttribute(phase, 1));
+        const mat = new THREE.ShaderMaterial({
+          uniforms: { uTime: { value: 0 } },
+          vertexShader: /* glsl */ `
+            attribute float aPhase;
+            varying float vPhase;
+            void main() {
+              vPhase = aPhase;
+              gl_PointSize = 2.4;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            varying float vPhase;
+            void main() {
+              vec2 uv = gl_PointCoord - 0.5;
+              if (length(uv) > 0.5) discard;
+              float tw = 0.3 + 0.5 * (0.5 + 0.5 * sin(uTime * 1.8 + vPhase));
+              gl_FragColor = vec4(0.75, 0.8, 0.95, tw);
+            }
+          `,
+          transparent: true,
+          depthWrite: false,
+        });
+        skyTwinkleMat = mat;
+        skyGroup.add(new THREE.Points(geo, mat));
+      }
+
+      // 4) 좋아요 곡 별들 — 하늘 돔 위 골든앵글 나선 배치 (최근 곡일수록 눈높이 가까이)
+      const idxs = songIds.map((id) => payload!.songs.id.indexOf(id)).filter((i) => i >= 0);
       const n = idxs.length;
+      skyDomePos = new Map();
       const hPos = new Float32Array(n * 3);
       const hCol = new Float32Array(n * 3);
       const hSize = new Float32Array(n);
       idxs.forEach((si, k) => {
-        hPos[k * 3] = positions![si * 3];
-        hPos[k * 3 + 1] = positions![si * 3 + 1];
-        hPos[k * 3 + 2] = positions![si * 3 + 2];
-        hCol.set([1, 0.95, 0.78], k * 3);
-        hSize[k] = 6 + (payload!.songs.popularity[si] / 100) * 4;
+        const frac = n === 1 ? 0.4 : k / (n - 1);
+        const elev = ((16 + 58 * frac) * Math.PI) / 180; // 최근(k=0)이 지평선 가까이
+        // 정면 ±120° 부채꼴 안에 골든앵글로 분산 — 조금만 둘러봐도 전부 보이게
+        const azimDeg = ((k * 137.508 + 120) % 240) - 120;
+        const azim = (azimDeg * Math.PI) / 180;
+        const r = 430;
+        const p = new THREE.Vector3(
+          C.x + r * Math.cos(elev) * Math.cos(azim),
+          C.y + r * Math.sin(elev),
+          C.z + r * Math.cos(elev) * Math.sin(azim),
+        );
+        skyDomePos!.set(si, p);
+        hPos.set([p.x, p.y, p.z], k * 3);
+        hCol.set([1, 0.93, 0.72], k * 3);
+        hSize[k] = 10 + (payload!.songs.popularity[si] / 100) * 5;
       });
-      skyHighlight = makePointsLayer(hPos, hCol, hSize, 1);
-      scene.add(skyHighlight);
+      skyGroup.add(makePointsLayer(hPos, hCol, hSize, 1));
       skyLabels = idxs.map((si) => ({
         el: makeLabel(payload!.songs.title[si], "song sky"),
-        pos: new THREE.Vector3(positions![si * 3], positions![si * 3 + 1], positions![si * 3 + 2]),
+        pos: skyDomePos!.get(si)!.clone(),
       }));
 
-      // 1인칭 시점: 카메라는 별 표면 바로 위에 서고, 시선은 "가장 최근 좋아요 곡"을 정면으로.
-      // (별은 곡들의 중심점이라 방향 평균이 0에 수렴 — 최근 곡이 가장 의미 있는 첫 시선)
-      const up = new THREE.Vector3(0, 1, 0);
-      camera.position.copy(skyStarPos).addScaledVector(up, 4);
-      const firstIdx = idxs[0];
-      const viewDir =
-        firstIdx != null
-          ? new THREE.Vector3(
-              positions![firstIdx * 3] - skyStarPos.x,
-              positions![firstIdx * 3 + 1] - skyStarPos.y,
-              positions![firstIdx * 3 + 2] - skyStarPos.z,
-            ).normalize()
-          : new THREE.Vector3(1, 0, 0);
-      controls.target.copy(skyStarPos).addScaledVector(viewDir, 45);
-      controls.minDistance = 30;
-      controls.maxDistance = 70;
+      // 5) 유성 준비
+      {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(3), 3));
+        const mat = new THREE.PointsMaterial({
+          color: 0xfff4d6,
+          size: 5,
+          sizeAttenuation: false,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        });
+        const obj = new THREE.Points(geo, mat);
+        skyGroup.add(obj);
+        meteor = { obj, from: new THREE.Vector3(), to: new THREE.Vector3(), start: -1 };
+        meteorNextAt = performance.now() + 3000;
+      }
+
+      scene.add(skyGroup);
+
+      // 카메라: 행성 표면 위에 "서서" 1인칭 고개 돌리기.
+      // 타깃을 눈앞 2유닛에 두면 드래그가 공전이 아니라 시선 회전이 된다.
+      // 줌은 잠그고(제자리), 드래그 방향은 하늘을 잡아끄는 감각으로 반전.
+      const eye = C.clone().addScaledVector(up, 3.5);
+      camera.position.copy(eye);
+      const firstDome = idxs.length > 0 ? skyDomePos.get(idxs[0])! : C.clone().add(new THREE.Vector3(430, 120, 0));
+      const viewDir = firstDome.clone().sub(eye).normalize();
+      controls.target.copy(eye).addScaledVector(viewDir, 2);
+      controls.minDistance = 2;
+      controls.maxDistance = 2;
+      controls.enableZoom = false;
+      controls.enablePan = false;
+      controls.rotateSpeed = -0.45;
+      controls.minPolarAngle = Math.PI * 0.12; // 천정 뒤집힘 방지
+      controls.maxPolarAngle = Math.PI * 0.62; // 발밑까지 파고들지 않게
 
       // 하단 카드: ○○의 밤하늘 (최근 좋아요 순서 유지)
       setCards({
@@ -765,18 +882,29 @@ export default function GalaxyCanvas({
       }
       skyActive = false;
       skyStarPos = null;
-      dimScale = 1;
-      if (points) (points.material as THREE.ShaderMaterial).uniforms.uAlpha.value = 0.95;
-      if (skyHighlight) {
-        scene.remove(skyHighlight);
-        skyHighlight.geometry.dispose();
-        (skyHighlight.material as THREE.Material).dispose();
-        skyHighlight = null;
+      skyDomePos = null;
+      skyTwinkleMat = null;
+      meteor = null;
+      if (skyGroup) {
+        scene.remove(skyGroup);
+        skyGroup.traverse((o) => {
+          if (o instanceof THREE.Mesh || o instanceof THREE.Points) {
+            o.geometry.dispose();
+            (o.material as THREE.Material).dispose();
+          }
+        });
+        skyGroup = null;
       }
+      scene.children.forEach((o) => (o.visible = true)); // 은하 복원
       skyLabels.forEach((l) => l.el.remove());
       skyLabels = [];
       controls.minDistance = 20;
       controls.maxDistance = 6000;
+      controls.enableZoom = true;
+      controls.enablePan = true;
+      controls.rotateSpeed = 1;
+      controls.minPolarAngle = 0;
+      controls.maxPolarAngle = Math.PI;
       setSkyInfo(null);
       setCards(null);
       setSelected(null);
@@ -1029,7 +1157,47 @@ export default function GalaxyCanvas({
       const t = now / 1000;
       if (bgStarsMat) bgStarsMat.uniforms.uTime.value = t;
       if (haloMat) haloMat.uniforms.uAlpha.value = (0.055 + 0.02 * Math.sin(t * 0.7)) * dimScale;
-      if (frame % 10 === 0) drawMinimap();
+      if (frame % 10 === 0 && !skyActive) drawMinimap();
+
+      // 밤하늘 모드: 잔별 반짝임 + 유성 (동물의 숲 감성)
+      if (skyActive) {
+        if (skyTwinkleMat) skyTwinkleMat.uniforms.uTime.value = t;
+        if (meteor && skyStarPos) {
+          const m = meteor;
+          const mat = m.obj.material as THREE.PointsMaterial;
+          if (m.start < 0 && now > meteorNextAt) {
+            const azim = Math.random() * Math.PI * 2;
+            const elev1 = ((48 + Math.random() * 26) * Math.PI) / 180;
+            const elev2 = elev1 - ((16 + Math.random() * 12) * Math.PI) / 180;
+            const azim2 = azim + 0.3 + Math.random() * 0.25;
+            const r = 620;
+            m.from.set(
+              skyStarPos.x + r * Math.cos(elev1) * Math.cos(azim),
+              skyStarPos.y + r * Math.sin(elev1),
+              skyStarPos.z + r * Math.cos(elev1) * Math.sin(azim),
+            );
+            m.to.set(
+              skyStarPos.x + r * Math.cos(elev2) * Math.cos(azim2),
+              skyStarPos.y + r * Math.sin(elev2),
+              skyStarPos.z + r * Math.cos(elev2) * Math.sin(azim2),
+            );
+            m.start = now;
+          }
+          if (m.start >= 0) {
+            const mt = (now - m.start) / 700;
+            if (mt >= 1) {
+              m.start = -1;
+              mat.opacity = 0;
+              meteorNextAt = now + 4000 + Math.random() * 8000;
+            } else {
+              const p = m.from.clone().lerp(m.to, mt);
+              (m.obj.geometry.attributes.position as THREE.BufferAttribute).setXYZ(0, p.x, p.y, p.z);
+              m.obj.geometry.attributes.position.needsUpdate = true;
+              mat.opacity = mt < 0.15 ? mt / 0.15 : 1 - (mt - 0.15) / 0.85;
+            }
+          }
+        }
+      }
 
       // 유저 별: 목표 좌표로 부드럽게 이동 + 닉네임 라벨
       if (userStars.length > 0) {
@@ -1045,7 +1213,7 @@ export default function GalaxyCanvas({
         if (frame % 2 === 1) {
           for (const s of userStars) {
             const d = camera.position.distanceTo(s.cur);
-            placeLabel(s.label, s.cur, 1.15 - d / 1000);
+            placeLabel(s.label, s.cur, skyActive ? 0 : 1.15 - d / 1000);
           }
         }
       }
@@ -1195,7 +1363,7 @@ export default function GalaxyCanvas({
         ref={minimapRef}
         width={140}
         height={140}
-        className="pointer-events-none absolute bottom-4 left-4 hidden rounded-full border border-white/10 bg-black/40 backdrop-blur sm:block"
+        className={`pointer-events-none absolute bottom-4 left-4 hidden rounded-full border border-white/10 bg-black/40 backdrop-blur ${skyInfo ? "" : "sm:block"}`}
       />
 
       {status === "error" && (
