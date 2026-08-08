@@ -85,6 +85,8 @@ export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   googleSub: text("google_sub").notNull().unique(),
   nickname: text("nickname").notNull(),
+  /** 행성 테마 slug — 원본 팔레트는 src/config/planet-themes.ts (SSOT) */
+  planetTheme: text("planet_theme"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

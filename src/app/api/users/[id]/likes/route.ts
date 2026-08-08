@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db, schema } from "@/db";
+import { GENRE_CLUSTERS } from "@/config/genre-clusters";
 
 export const dynamic = "force-dynamic";
 
+const CLUSTER_META = new Map(GENRE_CLUSTERS.map((c) => [c.slug, { label: c.label, color: c.color }]));
+
 /**
- * GET /api/users/[id]/likes — 그 유저의 좋아요 곡 id 전체 목록, 최근 순 (이슈 #9).
- * 행성 착륙 밤하늘용. 기본 공개(D15). 처음엔 최근 20곡 제한(D16)이었지만
- * "좋아요를 누른 별들을 다 볼 수 있게" 피드백으로 전체 표시로 변경.
+ * GET /api/users/[id]/likes — 그 유저의 좋아요 곡 id 전체(최근 순)와
+ * 행성 정보 패널용 요약(성단 분포 상위 3, 마지막 좋아요 시각). 기본 공개(D15).
  */
 export async function GET(
   _req: Request,
@@ -18,13 +21,37 @@ export async function GET(
   if (!Number.isInteger(userId)) {
     return NextResponse.json({ error: "잘못된 사용자 id" }, { status: 400 });
   }
-  const rows = await db
-    .select({ songId: schema.likes.songId })
-    .from(schema.likes)
-    .where(eq(schema.likes.userId, userId))
-    .orderBy(desc(schema.likes.createdAt));
+  const sub = alias(schema.themes, "sub");
+  const big = alias(schema.themes, "big");
+  const [rows, clusterRows] = await Promise.all([
+    db
+      .select({ songId: schema.likes.songId, at: schema.likes.createdAt })
+      .from(schema.likes)
+      .where(eq(schema.likes.userId, userId))
+      .orderBy(desc(schema.likes.createdAt)),
+    db
+      .select({ cluster: big.name, n: sql<number>`count(*)::int` })
+      .from(schema.likes)
+      .innerJoin(schema.songs, eq(schema.likes.songId, schema.songs.id))
+      .innerJoin(sub, eq(sub.id, schema.songs.themeId))
+      .innerJoin(big, eq(big.id, sub.parentId))
+      .where(eq(schema.likes.userId, userId))
+      .groupBy(big.name)
+      .orderBy(sql`count(*) desc`)
+      .limit(3),
+  ]);
   return NextResponse.json(
-    { songIds: rows.map((r) => r.songId) },
+    {
+      songIds: rows.map((r) => r.songId),
+      likesCount: rows.length,
+      lastLikedAt: rows[0]?.at ?? null,
+      clusters: clusterRows.map((c) => ({
+        slug: c.cluster,
+        label: CLUSTER_META.get(c.cluster)?.label ?? c.cluster,
+        color: CLUSTER_META.get(c.cluster)?.color ?? "#ffffff",
+        n: c.n,
+      })),
+    },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

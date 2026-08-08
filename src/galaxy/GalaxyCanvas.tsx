@@ -12,6 +12,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { MIN_LIKES_FOR_STAR } from "@/config/constants";
+import { getPlanetTheme } from "@/config/planet-themes";
+import { hashString, mulberry32 } from "@/lib/layout-math";
 import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
 
 const GALAXY_BG = "#05060f";
@@ -58,6 +60,15 @@ interface CardData {
 interface Media {
   artworkUrl: string | null;
   previewUrl: string | null;
+}
+
+/** 행성 정보 패널 데이터 (이슈 #10) */
+interface PlanetInfo {
+  userId: number;
+  nickname: string;
+  likesCount?: number;
+  lastLikedAt?: string | null;
+  clusters?: { slug: string; label: string; color: string; n: number }[];
 }
 
 interface AuthState {
@@ -118,9 +129,12 @@ function makePointsLayer(
 export default function GalaxyCanvas({
   initialSongId,
   focusMyStar,
+  landUserId,
 }: {
   initialSongId?: number;
   focusMyStar?: boolean;
+  /** /planet/[id] 딥링크 — 로드 후 이 유저의 행성으로 자동 착륙 */
+  landUserId?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const labelLayerRef = useRef<HTMLDivElement>(null);
@@ -144,10 +158,13 @@ export default function GalaxyCanvas({
     star: null,
   });
   const [toast, setToast] = useState<string | null>(null);
-  /** 밤하늘 모드 정보 (착륙 중/완료 시 세팅) — 헤더 버튼 전환용 */
-  const [skyInfo, setSkyInfo] = useState<{ nickname: string } | null>(null);
+  /** 밤하늘 모드 정보 (착륙 중/완료 시 세팅) — 헤더 전환·정보 패널용 */
+  const [skyInfo, setSkyInfo] = useState<PlanetInfo | null>(null);
   /** 착륙 진입 플래시 오버레이 */
   const [flash, setFlash] = useState(false);
+  /** 자동 라디오가 브라우저 정책에 막혔을 때 폴백 버튼 표시 */
+  const [radioBlocked, setRadioBlocked] = useState(false);
+  const autoRadioTried = useRef(false);
   const [selected, setSelected] = useState<SelectedSong | null>(null);
   const [artistInfo, setArtistInfo] = useState<ArtistInfo | null>(null);
   const [cards, setCards] = useState<CardData | null>(null);
@@ -205,17 +222,46 @@ export default function GalaxyCanvas({
   /** 미리듣기가 끝나면 다음 곡으로 자동 진행 (미리듣기 없는 곡은 건너뜀) */
   const playNextRef = useRef<(afterId: number) => Promise<void>>(async () => {});
 
-  const playSong = useCallback((songId: number, previewUrl: string) => {
+  const playSong = useCallback((songId: number, previewUrl: string): Promise<void> => {
     if (!audioRef.current) {
       audioRef.current = new Audio();
       audioRef.current.volume = 0.8;
     }
     const audio = audioRef.current;
     audio.src = previewUrl;
-    void audio.play();
     audio.onended = () => void playNextRef.current(songId);
     setPlayingId(songId);
+    return audio.play();
   }, []);
+
+  /** 착륙 후 자동 라디오 (이슈 #10) — 첫 미리듣기 곡부터 연속 재생 시작 */
+  const tryRadio = useCallback(async (cardData: CardData | null = cardsRef.current) => {
+    if (!cardData || cardData.songs.length === 0) return;
+    const firstBatch = cardData.songs.slice(0, ENRICH_BATCH);
+    await fetchMedia(firstBatch.map((s) => s.id));
+    const target = firstBatch.find((s) => mediaRef.current[s.id]?.previewUrl);
+    if (!target) return;
+    try {
+      await playSong(target.id, mediaRef.current[target.id]!.previewUrl!);
+      setRadioBlocked(false);
+    } catch {
+      // 브라우저 자동재생 정책에 차단 — 수동 시작 버튼 폴백
+      setPlayingId(null);
+      setRadioBlocked(true);
+    }
+  }, [fetchMedia, playSong]);
+
+  useEffect(() => {
+    if (skyInfo && cards) {
+      if (!autoRadioTried.current) {
+        autoRadioTried.current = true;
+        void tryRadio(cards);
+      }
+    } else if (!skyInfo) {
+      autoRadioTried.current = false;
+      setRadioBlocked(false);
+    }
+  }, [skyInfo, cards, tryRadio]);
 
   playNextRef.current = async (afterId: number) => {
     const cardData = cardsRef.current;
@@ -240,7 +286,7 @@ export default function GalaxyCanvas({
       if (cardsRef.current !== cardData) return;
       if (m?.previewUrl) {
         scrollToCard(i);
-        playSong(song.id, m.previewUrl);
+        playSong(song.id, m.previewUrl).catch(() => setPlayingId(null));
         return;
       }
     }
@@ -255,7 +301,7 @@ export default function GalaxyCanvas({
         setPlayingId(null);
         return;
       }
-      playSong(songId, previewUrl);
+      playSong(songId, previewUrl).catch(() => setPlayingId(null));
     },
     [playingId, playSong],
   );
@@ -626,8 +672,19 @@ export default function GalaxyCanvas({
       });
       const p = new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
       if (skyActive && skyStarPos) {
-        // 밤하늘 모드: 별 위에 선 채로 그 곡의 돔 위치로 시선만 회전
+        // 밤하늘 모드: 별 위에 선 채로 그 곡의 돔 위치로 시선만 회전 + 선택 링 표시
         const domeP = skyDomePos?.get(index) ?? p;
+        if (skyRing) {
+          (skyRing.geometry.attributes.position as THREE.BufferAttribute).setXYZ(
+            0,
+            domeP.x,
+            domeP.y,
+            domeP.z,
+          );
+          skyRing.geometry.attributes.position.needsUpdate = true;
+          skyRing.geometry.computeBoundingSphere();
+          skyRing.visible = true;
+        }
         const dir = domeP.clone().sub(camera.position).normalize();
         fly = {
           fromPos: camera.position.clone(),
@@ -650,6 +707,9 @@ export default function GalaxyCanvas({
     let skyDomePos: Map<number, THREE.Vector3> | null = null; // songIndex → 돔 좌표
     let skyHighlightPoints: THREE.Points | null = null; // 밤하늘 곡 별 (클릭 판정용)
     let skyHighlightIdx: number[] = []; // 포인트 k번째 → songIndex
+    let skyRing: THREE.Points | null = null; // 선택된 별 글로우 링 (이슈 #10-4)
+    let skyRingMat: THREE.ShaderMaterial | null = null;
+    let hoveredK = -1; // 호버 중인 밤하늘 별 인덱스
     let skyLabels: { el: HTMLDivElement; pos: THREE.Vector3 }[] = [];
     let landingTimers: number[] = [];
     let pendingSky: { entry: StarEntry; songIds: number[] | null } | null = null;
@@ -670,11 +730,18 @@ export default function GalaxyCanvas({
       const C = skyStarPos;
       const up = new THREE.Vector3(0, 1, 0);
       skyGroup = new THREE.Group();
+      // 행성 주인의 테마 (SSOT: planet-themes.ts) — 방문자에게도 주인의 색으로
+      const planet = getPlanetTheme(entry.data.planetTheme);
 
-      // 1) 하늘 돔 — 지평선은 옅은 남색, 천정으로 갈수록 깊은 밤 (동물의 숲 야경 톤)
+      // 1) 하늘 돔 — 테마 색 그라데이션 + 지평선 글로우 밴드 (이슈 #10-3)
       const domeMat = new THREE.ShaderMaterial({
         side: THREE.BackSide,
         depthWrite: false,
+        uniforms: {
+          uHorizon: { value: new THREE.Color(planet.horizon) },
+          uZenith: { value: new THREE.Color(planet.zenith) },
+          uGlow: { value: new THREE.Color(planet.glow) },
+        },
         vertexShader: /* glsl */ `
           varying vec3 vDir;
           void main() {
@@ -683,12 +750,16 @@ export default function GalaxyCanvas({
           }
         `,
         fragmentShader: /* glsl */ `
+          uniform vec3 uHorizon;
+          uniform vec3 uZenith;
+          uniform vec3 uGlow;
           varying vec3 vDir;
           void main() {
             float h = clamp(vDir.y, 0.0, 1.0);
-            vec3 horizon = vec3(0.10, 0.16, 0.32);
-            vec3 zenith = vec3(0.012, 0.025, 0.07);
-            gl_FragColor = vec4(mix(horizon, zenith, smoothstep(0.0, 0.55, h)), 1.0);
+            vec3 col = mix(uHorizon, uZenith, smoothstep(0.0, 0.55, h));
+            // 지평선 글로우 밴드 — 땅과 하늘이 만나는 곳의 은은한 빛
+            col += uGlow * exp(-abs(vDir.y) * 10.0) * 0.45;
+            gl_FragColor = vec4(col, 1.0);
           }
         `,
       });
@@ -696,11 +767,48 @@ export default function GalaxyCanvas({
       dome.position.copy(C);
       skyGroup.add(dome);
 
-      // 2) 지면 — 작은 행성 위에 선 듯한 곡면 지평선
-      const groundMat = new THREE.MeshBasicMaterial({ color: 0x0a141c });
+      // 2) 지면 — 작은 행성 위에 선 듯한 곡면 지평선 (테마 색)
+      const groundMat = new THREE.MeshBasicMaterial({ color: planet.ground });
       const ground = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 24), groundMat);
       ground.position.copy(C).addScaledVector(up, -298.5); // 꼭대기가 발밑 ~1.5 아래
       skyGroup.add(ground);
+
+      // 2-1) 지평선 언덕 실루엣 — 유저별 시드로 굴곡이 다른 원형 능선 (이슈 #10-3)
+      {
+        const segments = 160;
+        const ringR = 620;
+        const rng = mulberry32(hashString(`hill:${entry.data.userId}`));
+        const p1 = rng() * Math.PI * 2;
+        const p2 = rng() * Math.PI * 2;
+        const p3 = rng() * Math.PI * 2;
+        const verts = new Float32Array((segments + 1) * 2 * 3);
+        for (let i = 0; i <= segments; i++) {
+          const a = (i / segments) * Math.PI * 2;
+          const h =
+            10 +
+            14 * Math.abs(Math.sin(a * 2 + p1)) +
+            9 * Math.abs(Math.sin(a * 5 + p2)) +
+            5 * Math.sin(a * 9 + p3);
+          const x = C.x + ringR * Math.cos(a);
+          const z = C.z + ringR * Math.sin(a);
+          verts.set([x, C.y - 40, z], i * 6);
+          verts.set([x, C.y + h, z], i * 6 + 3);
+        }
+        const index: number[] = [];
+        for (let i = 0; i < segments; i++) {
+          const b = i * 2;
+          index.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(verts, 3));
+        geo.setIndex(index);
+        const silColor = new THREE.Color(planet.ground).multiplyScalar(0.55);
+        const sil = new THREE.Mesh(
+          geo,
+          new THREE.MeshBasicMaterial({ color: silColor, side: THREE.DoubleSide }),
+        );
+        skyGroup.add(sil);
+      }
 
       // 3) 장식 잔별 900개 — 각자 위상이 다른 반짝임 (배경 별 셰이더와 동일 패턴)
       {
@@ -778,6 +886,38 @@ export default function GalaxyCanvas({
       skyHighlightPoints = makePointsLayer(hPos, hCol, hSize, 1);
       skyHighlightIdx = idxs.slice();
       skyGroup.add(skyHighlightPoints);
+
+      // 선택된 별 글로우 링 (숨김 상태로 준비, 곡 선택 시 표시)
+      {
+        const ringGeo = new THREE.BufferGeometry();
+        ringGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(3), 3));
+        skyRingMat = new THREE.ShaderMaterial({
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          uniforms: { uTime: { value: 0 } },
+          vertexShader: /* glsl */ `
+            void main() {
+              vec4 mv = modelViewMatrix * vec4(position, 1.0);
+              gl_PointSize = clamp(9000.0 / -mv.z, 40.0, 110.0);
+              gl_Position = projectionMatrix * mv;
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            void main() {
+              vec2 uv = gl_PointCoord - 0.5;
+              float d = length(uv);
+              float ring = smoothstep(0.30, 0.34, d) * smoothstep(0.44, 0.40, d);
+              float pulse = 0.7 + 0.3 * sin(uTime * 3.0);
+              gl_FragColor = vec4(1.0, 0.95, 0.8, ring * pulse);
+            }
+          `,
+        });
+        skyRing = new THREE.Points(ringGeo, skyRingMat);
+        skyRing.visible = false;
+        skyGroup.add(skyRing);
+      }
       skyLabels = idxs.map((si) => ({
         el: makeLabel(payload!.songs.title[si], "song sky", songColor(si)),
         pos: skyDomePos!.get(si)!.clone(),
@@ -835,7 +975,11 @@ export default function GalaxyCanvas({
           popularity: payload!.songs.popularity[si],
         })),
       });
-      setSkyInfo({ nickname: entry.data.nickname });
+      setSkyInfo((prev) =>
+        prev?.userId === entry.data.userId
+          ? prev
+          : { userId: entry.data.userId, nickname: entry.data.nickname },
+      );
       setSelected(null);
     };
 
@@ -854,16 +998,33 @@ export default function GalaxyCanvas({
       pendingSky = { entry, songIds: null };
       setSelected(null);
       setCards(null);
-      setSkyInfo({ nickname: entry.data.nickname });
-      // 좋아요 목록은 비행하는 동안 미리 로드
+      setSkyInfo({ userId: entry.data.userId, nickname: entry.data.nickname });
+      // 좋아요 목록·행성 정보는 비행하는 동안 미리 로드
       fetch(`/api/users/${entry.data.userId}/likes`)
         .then((r) => (r.ok ? r.json() : { songIds: [] }))
-        .then((d: { songIds: number[] }) => {
-          if (pendingSky?.entry === entry) {
-            pendingSky.songIds = d.songIds ?? [];
-            applySkyIfReady();
-          }
-        })
+        .then(
+          (d: {
+            songIds: number[];
+            likesCount?: number;
+            lastLikedAt?: string | null;
+            clusters?: PlanetInfo["clusters"];
+          }) => {
+            if (pendingSky?.entry === entry) {
+              pendingSky.songIds = d.songIds ?? [];
+              setSkyInfo((prev) =>
+                prev?.userId === entry.data.userId
+                  ? {
+                      ...prev,
+                      likesCount: d.likesCount,
+                      lastLikedAt: d.lastLikedAt,
+                      clusters: d.clusters,
+                    }
+                  : prev,
+              );
+              applySkyIfReady();
+            }
+          },
+        )
         .catch(() => {
           if (pendingSky?.entry === entry) {
             pendingSky.songIds = [];
@@ -905,6 +1066,10 @@ export default function GalaxyCanvas({
       skyTwinkleMat = null;
       skyHighlightPoints = null;
       skyHighlightIdx = [];
+      skyRing = null;
+      skyRingMat = null;
+      hoveredK = -1;
+      renderer.domElement.style.cursor = "";
       meteor = null;
       if (skyGroup) {
         scene.remove(skyGroup);
@@ -1032,8 +1197,33 @@ export default function GalaxyCanvas({
       if (hit?.index == null) return;
       flySongRef.current?.(hit.index);
     };
+    // 밤하늘 별 호버 강조 (이슈 #10-4) — 60ms 스로틀
+    let lastHoverAt = 0;
+    const onPointerMove = (e: PointerEvent) => {
+      if (!skyActive || !skyHighlightPoints) return;
+      const nowMs = performance.now();
+      if (nowMs - lastHoverAt < 60) return;
+      lastHoverAt = nowMs;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(ndc, camera);
+      raycaster.params.Points.threshold = 14;
+      const hit = raycaster.intersectObject(skyHighlightPoints)[0];
+      raycaster.params.Points.threshold = 6;
+      const k = hit?.index ?? -1;
+      if (k !== hoveredK) {
+        if (hoveredK >= 0) skyLabels[hoveredK]?.el.classList.remove("hover");
+        hoveredK = k;
+        if (k >= 0) skyLabels[k]?.el.classList.add("hover");
+        renderer.domElement.style.cursor = k >= 0 ? "pointer" : "";
+      }
+    };
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
+    renderer.domElement.addEventListener("pointermove", onPointerMove);
 
     // 데이터 로드 → 씬 구성
     fetch("/api/galaxy")
@@ -1068,7 +1258,13 @@ export default function GalaxyCanvas({
         fetch("/api/stars")
           .then((r) => (r.ok ? r.json() : []))
           .then((stars: GalaxyStar[]) => {
-            if (!disposed) stars.forEach(upsertStar);
+            if (disposed) return;
+            stars.forEach(upsertStar);
+            // /planet/[id] 딥링크 — 그 유저의 행성으로 자동 착륙 (이슈 #10-2)
+            if (landUserId != null) {
+              const target = userStars.find((s) => s.data.userId === landUserId);
+              if (target) landOnStar(target);
+            }
           })
           .catch(() => undefined);
 
@@ -1192,9 +1388,10 @@ export default function GalaxyCanvas({
       if (haloMat) haloMat.uniforms.uAlpha.value = (0.055 + 0.02 * Math.sin(t * 0.7)) * dimScale;
       if (frame % 10 === 0 && !skyActive) drawMinimap();
 
-      // 밤하늘 모드: 잔별 반짝임 + 유성 (동물의 숲 감성)
+      // 밤하늘 모드: 잔별 반짝임 + 선택 링 펄스 + 유성 (동물의 숲 감성)
       if (skyActive) {
         if (skyTwinkleMat) skyTwinkleMat.uniforms.uTime.value = t;
+        if (skyRingMat) skyRingMat.uniforms.uTime.value = t;
         if (meteor && skyStarPos) {
           const m = meteor;
           const mat = m.obj.material as THREE.PointsMaterial;
@@ -1262,6 +1459,7 @@ export default function GalaxyCanvas({
       window.removeEventListener("resize", resize);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
+      renderer.domElement.removeEventListener("pointermove", onPointerMove);
       controls.dispose();
       scene.traverse((obj) => {
         if (obj instanceof THREE.Points) {
@@ -1290,18 +1488,52 @@ export default function GalaxyCanvas({
         style={{ containerType: "size" }}
       />
 
-      {/* 상단 오버레이 */}
-      <div className="pointer-events-none absolute left-4 top-4 text-white/90">
-        <h1 className="text-lg font-semibold tracking-wide">songGalaxy</h1>
-        {status === "ready" && (
-          <p className="text-xs text-white/50">{songCount.toLocaleString()}곡이 떠 있는 은하 · 장르를 클릭해 들어가보세요</p>
-        )}
-        {status === "ready" && authState.authenticated && authState.likesCount < MIN_LIKES_FOR_STAR && (
-          <p className="mt-1 text-xs text-amber-200/90">
-            ✦ 별까지 {MIN_LIKES_FOR_STAR - authState.likesCount}곡 — 좋아하는 곡에 ♥를 눌러보세요
-          </p>
-        )}
-      </div>
+      {/* 상단 오버레이 — 은하에서는 타이틀, 행성에서는 정보 패널 (이슈 #10-1) */}
+      {skyInfo ? (
+        <div className="pointer-events-none absolute left-4 top-4 max-w-xs rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white backdrop-blur">
+          <p className="text-[11px] tracking-widest text-white/40">PLANET</p>
+          <h1 className="mt-0.5 text-lg font-semibold">✦ {skyInfo.nickname}의 행성</h1>
+          {skyInfo.likesCount != null && (
+            <p className="mt-1 text-xs text-white/55">
+              좋아요 {skyInfo.likesCount}곡
+              {skyInfo.lastLikedAt && (
+                <span className="text-white/35">
+                  {" · 최근 "}
+                  {new Date(skyInfo.lastLikedAt).toLocaleDateString("ko-KR", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
+              )}
+            </p>
+          )}
+          {skyInfo.clusters && skyInfo.clusters.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {skyInfo.clusters.map((c) => (
+                <span
+                  key={c.slug}
+                  className="rounded-full border border-white/15 px-2 py-0.5 text-[10px]"
+                  style={{ color: c.color }}
+                >
+                  {c.label} {c.n}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="pointer-events-none absolute left-4 top-4 text-white/90">
+          <h1 className="text-lg font-semibold tracking-wide">songGalaxy</h1>
+          {status === "ready" && (
+            <p className="text-xs text-white/50">{songCount.toLocaleString()}곡이 떠 있는 은하 · 장르를 클릭해 들어가보세요</p>
+          )}
+          {status === "ready" && authState.authenticated && authState.likesCount < MIN_LIKES_FOR_STAR && (
+            <p className="mt-1 text-xs text-amber-200/90">
+              ✦ 별까지 {MIN_LIKES_FOR_STAR - authState.likesCount}곡 — 좋아하는 곡에 ♥를 눌러보세요
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="absolute right-4 top-4 flex gap-2">
         {authState.star && (
@@ -1348,13 +1580,29 @@ export default function GalaxyCanvas({
           곡 목록
         </a>
         {skyInfo ? (
-          <button
-            type="button"
-            onClick={() => exitSkyRef.current?.()}
-            className="rounded-full border border-amber-200/40 bg-amber-100/15 px-4 py-1.5 text-sm text-amber-100 backdrop-blur transition hover:bg-amber-100/25"
-          >
-            은하로 나가기
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard
+                  .writeText(`${window.location.origin}/planet/${skyInfo.userId}`)
+                  .then(() => {
+                    setToast("🔗 행성 링크를 복사했어요");
+                    setTimeout(() => setToast(null), 3000);
+                  });
+              }}
+              className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
+            >
+              🔗 링크 복사
+            </button>
+            <button
+              type="button"
+              onClick={() => exitSkyRef.current?.()}
+              className="rounded-full border border-amber-200/40 bg-amber-100/15 px-4 py-1.5 text-sm text-amber-100 backdrop-blur transition hover:bg-amber-100/25"
+            >
+              은하로 나가기
+            </button>
+          </>
         ) : (
           <button
             type="button"
@@ -1374,6 +1622,17 @@ export default function GalaxyCanvas({
             "radial-gradient(circle at 50% 55%, rgba(255,236,190,0.98) 0%, rgba(255,214,140,0.9) 35%, rgba(30,22,8,0.95) 100%)",
         }}
       />
+
+      {/* 자동 라디오가 브라우저 정책에 막혔을 때 수동 시작 (이슈 #10-5) */}
+      {skyInfo && radioBlocked && (
+        <button
+          type="button"
+          onClick={() => void tryRadio()}
+          className="absolute left-1/2 top-24 z-10 -translate-x-1/2 rounded-full border border-white/25 bg-black/60 px-5 py-2 text-sm text-white backdrop-blur transition hover:bg-black/80"
+        >
+          ▶ 라디오 시작
+        </button>
+      )}
 
       {/* 별 탄생 등 알림 토스트 */}
       {toast && (

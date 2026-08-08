@@ -5,7 +5,9 @@ import { db, schema } from "@/db";
 import { getSessionUser } from "@/auth";
 import { MIN_LIKES_FOR_STAR } from "@/config/constants";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
+import { DEFAULT_PLANET_THEME, PLANET_THEMES } from "@/config/planet-themes";
 import LikeButton from "@/components/LikeButton";
+import { setPlanetThemeAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +32,7 @@ export default async function MePage() {
     );
   }
 
-  const [likedSongs, [star], clusterDist] = await Promise.all([
+  const [likedSongs, [star], clusterDist, [me]] = await Promise.all([
     db
       .select({
         id: schema.songs.id,
@@ -61,7 +63,12 @@ export default async function MePage() {
         .groupBy(big.name)
         .orderBy(sql`count(*) desc`);
     })(),
+    db
+      .select({ planetTheme: schema.users.planetTheme })
+      .from(schema.users)
+      .where(eq(schema.users.id, user.id)),
   ]);
+  const currentTheme = me?.planetTheme ?? DEFAULT_PLANET_THEME;
 
   const total = likedSongs.length;
 
@@ -96,6 +103,38 @@ export default async function MePage() {
             </p>
           )}
         </section>
+
+        {/* 행성 테마 (이슈 #10 꾸미기 맛보기) */}
+        {star && (
+          <section className="mb-8">
+            <h2 className="mb-3 text-sm font-medium text-white/60">
+              내 행성 테마 <span className="text-white/35">— 방문자에게도 이 색으로 보여요</span>
+            </h2>
+            <div className="flex flex-wrap gap-3">
+              {PLANET_THEMES.map((theme) => (
+                <form key={theme.slug} action={setPlanetThemeAction}>
+                  <input type="hidden" name="theme" value={theme.slug} />
+                  <button
+                    type="submit"
+                    className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 transition ${
+                      currentTheme === theme.slug
+                        ? "border-amber-200/60 bg-white/10"
+                        : "border-white/10 bg-white/[0.03] hover:bg-white/10"
+                    }`}
+                  >
+                    <span
+                      className="h-8 w-8 rounded-full border border-white/20"
+                      style={{
+                        background: `linear-gradient(to bottom, ${theme.zenith} 0%, ${theme.horizon} 55%, ${theme.glow} 68%, ${theme.ground} 72%)`,
+                      }}
+                    />
+                    <span className="text-sm">{theme.label}</span>
+                  </button>
+                </form>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* 성단 분포 */}
         {clusterDist.length > 0 && (

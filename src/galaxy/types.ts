@@ -25,6 +25,8 @@ export interface GalaxyStar {
   x: number;
   y: number;
   z: number;
+  /** 행성 테마 slug (src/config/planet-themes.ts) */
+  planetTheme?: string | null;
 }
 
 export interface GalaxyPayload {

@@ -18,6 +18,7 @@ export async function GET(): Promise<NextResponse> {
       y: schema.userStars.posY,
       z: schema.userStars.posZ,
       nickname: schema.users.nickname,
+      planetTheme: schema.users.planetTheme,
     })
     .from(schema.userStars)
     .innerJoin(schema.users, eq(schema.users.id, schema.userStars.userId));
