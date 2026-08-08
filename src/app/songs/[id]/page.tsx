@@ -33,7 +33,7 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
   const user = await getSessionUser();
   const [media, artist, lyrics, videoId, [likeCount], myLike] = await Promise.all([
     enrichSongs([songId]).then((m) => m[songId]),
-    getArtistInfo(song.artist),
+    getArtistInfo(song.artist, song.genre),
     getLyrics(songId),
     getYoutubeVideoId(songId),
     db

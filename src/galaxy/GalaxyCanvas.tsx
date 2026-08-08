@@ -29,6 +29,8 @@ const ENRICH_BATCH = 12;
 interface SelectedSong {
   title: string;
   artist: string;
+  /** 가수 동명이인 판별 힌트 */
+  genre?: string;
 }
 
 interface ArtistInfo {
@@ -357,7 +359,9 @@ export default function GalaxyCanvas({
     setArtistInfo(null);
     if (!selected) return;
     let cancelled = false;
-    fetch(`/api/artist?name=${encodeURIComponent(selected.artist)}`)
+    fetch(
+      `/api/artist?name=${encodeURIComponent(selected.artist)}${selected.genre ? `&genre=${encodeURIComponent(selected.genre)}` : ""}`,
+    )
       .then((r) => (r.ok ? r.json() : null))
       .then((info: ArtistInfo | null) => {
         if (!cancelled && info && (info.type || info.country || info.beginYear)) {
@@ -614,7 +618,12 @@ export default function GalaxyCanvas({
     flyToPosRef.current = (x, y, z, dist) => flyTo(new THREE.Vector3(x, y, z), dist);
     flySongRef.current = (index: number) => {
       if (!positions || !payload) return;
-      setSelected({ title: payload.songs.title[index], artist: payload.songs.artist[index] });
+      const theme = payload.themes.find((th) => th.id === payload!.songs.themeId[index]);
+      setSelected({
+        title: payload.songs.title[index],
+        artist: payload.songs.artist[index],
+        genre: theme?.level === 2 ? theme.name : undefined,
+      });
       const p = new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
       if (skyActive && skyStarPos) {
         // 밤하늘 모드: 별 위에 선 채로 그 곡의 돔 위치로 시선만 회전
