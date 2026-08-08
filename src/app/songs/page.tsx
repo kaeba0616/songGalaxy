@@ -107,7 +107,10 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // 검색어가 있으면 은하 밖(iTunes)에서도 후보를 찾는다 — 신인·최신곡 즉석 편입 경로
-  const external = q && page === 1 ? await searchExternal(q) : [];
+  // 이미 은하에 있는 곡은 목록에서 뺀다 (방금 추가한 곡만 "추가했어요" 표시용으로 남김)
+  const external = (q && page === 1 ? await searchExternal(q) : []).filter(
+    (ext) => !ext.existingSongId || String(ext.existingSongId) === params.added,
+  );
 
   /** 현재 필터를 유지한 채 일부 파라미터만 바꾼 URL */
   const pageUrl = (overrides: Partial<SongsSearchParams>) => {
@@ -259,11 +262,12 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
                     </p>
                   </div>
                   {ext.existingSongId ? (
+                    /* 필터 덕에 여기 오는 건 방금 추가한 곡뿐 — 한 번 더 누르면 상세로 */
                     <Link
                       href={`/songs/${ext.existingSongId}`}
-                      className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs transition ${String(ext.existingSongId) === params.added ? "added-pop border-amber-200/50 bg-amber-100/15 text-amber-100 hover:bg-amber-100/25" : "border-white/15 text-white/60 hover:bg-white/10"}`}
+                      className="added-pop shrink-0 rounded-full border border-amber-200/50 bg-amber-100/15 px-3.5 py-1.5 text-xs text-amber-100 transition hover:bg-amber-100/25"
                     >
-                      {String(ext.existingSongId) === params.added ? "✓ 추가했어요 →" : "이미 있어요 →"}
+                      ✓ 추가했어요 →
                     </Link>
                   ) : (
                     <form action={importSongAction}>
