@@ -639,6 +639,8 @@ export default function GalaxyCanvas({
     let skyGroup: THREE.Group | null = null;
     let skyTwinkleMat: THREE.ShaderMaterial | null = null; // 잔별 반짝임 시간 갱신용
     let skyDomePos: Map<number, THREE.Vector3> | null = null; // songIndex → 돔 좌표
+    let skyHighlightPoints: THREE.Points | null = null; // 밤하늘 곡 별 (클릭 판정용)
+    let skyHighlightIdx: number[] = []; // 포인트 k번째 → songIndex
     let skyLabels: { el: HTMLDivElement; pos: THREE.Vector3 }[] = [];
     let landingTimers: number[] = [];
     let pendingSky: { entry: StarEntry; songIds: number[] | null } | null = null;
@@ -764,7 +766,9 @@ export default function GalaxyCanvas({
         hCol.set([tmpColor.r, tmpColor.g, tmpColor.b], k * 3);
         hSize[k] = 10 + (payload!.songs.popularity[si] / 100) * 5;
       });
-      skyGroup.add(makePointsLayer(hPos, hCol, hSize, 1));
+      skyHighlightPoints = makePointsLayer(hPos, hCol, hSize, 1);
+      skyHighlightIdx = idxs.slice();
+      skyGroup.add(skyHighlightPoints);
       skyLabels = idxs.map((si) => ({
         el: makeLabel(payload!.songs.title[si], "song sky", songColor(si)),
         pos: skyDomePos!.get(si)!.clone(),
@@ -890,6 +894,8 @@ export default function GalaxyCanvas({
       skyStarPos = null;
       skyDomePos = null;
       skyTwinkleMat = null;
+      skyHighlightPoints = null;
+      skyHighlightIdx = [];
       meteor = null;
       if (skyGroup) {
         scene.remove(skyGroup);
@@ -991,6 +997,18 @@ export default function GalaxyCanvas({
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       raycaster.setFromCamera(ndc, camera);
+      // 밤하늘 모드: 하늘의 곡 별만 클릭 대상 — 숨겨진 은하 포인트는 레이캐스트 금지
+      // (three 레이캐스터는 visible=false여도 검사하므로, 안 막으면 엉뚱한 곡이 잡힌다)
+      if (skyActive) {
+        if (skyHighlightPoints) {
+          raycaster.params.Points.threshold = 14;
+          const hit = raycaster.intersectObject(skyHighlightPoints)[0];
+          raycaster.params.Points.threshold = 6;
+          const songIndex = hit?.index != null ? skyHighlightIdx[hit.index] : undefined;
+          if (songIndex != null) flySongRef.current?.(songIndex);
+        }
+        return;
+      }
       // 유저 별 우선 판정 (은하 모드에서만 착륙)
       if (!skyActive && userStars.length > 0) {
         raycaster.params.Points.threshold = 14;
