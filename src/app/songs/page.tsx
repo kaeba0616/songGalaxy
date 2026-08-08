@@ -4,6 +4,7 @@ import { db, schema } from "@/db";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
 import { searchExternal } from "@/server/import-song";
 import { importSongAction } from "./actions";
+import ImportButton from "./ImportButton";
 
 export const dynamic = "force-dynamic";
 
@@ -260,7 +261,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
                   {ext.existingSongId ? (
                     <Link
                       href={`/songs/${ext.existingSongId}`}
-                      className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs transition ${String(ext.existingSongId) === params.added ? "border-amber-200/50 bg-amber-100/15 text-amber-100 hover:bg-amber-100/25" : "border-white/15 text-white/60 hover:bg-white/10"}`}
+                      className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs transition ${String(ext.existingSongId) === params.added ? "added-pop border-amber-200/50 bg-amber-100/15 text-amber-100 hover:bg-amber-100/25" : "border-white/15 text-white/60 hover:bg-white/10"}`}
                     >
                       {String(ext.existingSongId) === params.added ? "✓ 추가했어요 →" : "이미 있어요 →"}
                     </Link>
@@ -273,12 +274,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
                       <input type="hidden" name="cluster" value={cluster?.slug ?? ""} />
                       <input type="hidden" name="genre" value={genre ?? ""} />
                       <input type="hidden" name="sort" value={sort} />
-                      <button
-                        type="submit"
-                        className="shrink-0 rounded-full border border-white/25 bg-white/10 px-3.5 py-1.5 text-xs transition hover:bg-white/20"
-                      >
-                        ✦ 은하에 추가
-                      </button>
+                      <ImportButton />
                     </form>
                   )}
                 </li>

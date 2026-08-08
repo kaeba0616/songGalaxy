@@ -123,3 +123,21 @@ body {
 .galaxy-pulse-once {
   animation: galaxy-toast-in 0.5s ease-out;
 }
+
+/* "추가했어요" 전환 팝 — 작아졌다 튀어오르며 나타난다 */
+@keyframes added-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.added-pop {
+  animation: added-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
