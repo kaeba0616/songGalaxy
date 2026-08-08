@@ -1688,6 +1688,17 @@ export default function GalaxyCanvas({
     if (el) el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: "smooth" });
   };
 
+  /** 접힌 상태 미니플레이어에 보여줄 곡 — 재생 중 > 포커스 > 목록 첫 곡 */
+  const miniSong = cards
+    ? (cards.songs.find((s) => s.id === (playingId ?? focusedCardId)) ?? cards.songs[0])
+    : null;
+  const miniMedia = miniSong ? media[miniSong.id] : undefined;
+
+  // 접힌 미니플레이어의 앨범아트가 아직 없으면 그 곡만 보강
+  useEffect(() => {
+    if (cardsCollapsed && miniSong && !miniMedia) void fetchMedia([miniSong.id]);
+  }, [cardsCollapsed, miniSong, miniMedia, fetchMedia]);
+
   return (
     <div className="relative h-dvh w-full overflow-hidden" style={{ background: GALAXY_BG }}>
       <div ref={containerRef} className="absolute inset-0" />
@@ -1889,27 +1900,52 @@ export default function GalaxyCanvas({
         <div
           className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pb-4 pt-8 transition-transform duration-300 ease-out"
           style={{
-            transform: cardsCollapsed ? "translateY(calc(100% - 3.75rem))" : "translateY(0)",
+            /* 접힘: 상단 여백(pt-8) + 미니플레이어 줄(h-10)만 남긴다 */
+            transform: cardsCollapsed ? "translateY(calc(100% - 4.5rem))" : "translateY(0)",
           }}
         >
-          <div className="mb-2 flex items-center justify-between px-5">
-            <p className="text-sm text-white/90">
-              <span className="font-semibold" style={{ color: cards.color }}>
-                {cards.title}
-              </span>
-              <span className="ml-2 text-white/50">{cards.subtitle}</span>
-            </p>
-            <div className="flex items-center gap-3">
-              {/* 카드 목록 내리기/올리기 */}
-              <button
-                type="button"
-                onClick={() => setCardsCollapsed((c) => !c)}
-                className="rounded-full border border-white/15 px-2.5 py-0.5 text-xs text-white/70 transition hover:bg-white/10 hover:text-white"
-                aria-label={cardsCollapsed ? "곡 목록 올리기" : "곡 목록 내리기"}
-                title={cardsCollapsed ? "곡 목록 올리기" : "곡 목록 내리기"}
-              >
-                {cardsCollapsed ? "▲" : "▼"}
-              </button>
+          <div className="mb-2 flex items-center justify-between gap-3 px-5">
+            {cardsCollapsed && miniSong ? (
+              /* 접힌 상태 미니플레이어 — 지금 듣는 곡 정보 + 좋아요 */
+              <div className="flex min-w-0 items-center gap-3">
+                {miniMedia?.artworkUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지, 최적화 프록시 불필요
+                  <img
+                    src={miniMedia.artworkUrl}
+                    alt=""
+                    className="h-10 w-10 shrink-0 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/10 text-lg"
+                    style={{ color: cards.color }}
+                  >
+                    ✦
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-white">{miniSong.title}</p>
+                  <p className="truncate text-xs text-white/50">{miniSong.artist}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void toggleLike(miniSong.id)}
+                  className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs transition ${authState.likedIds.has(miniSong.id) ? "border-pink-400/60 bg-pink-500/25 text-pink-200" : "border-white/20 bg-white/10 text-white/70 hover:bg-white/20"}`}
+                  aria-label={authState.likedIds.has(miniSong.id) ? "좋아요 취소" : "좋아요"}
+                  title={authState.authenticated ? "좋아요" : "로그인하고 좋아요"}
+                >
+                  {authState.likedIds.has(miniSong.id) ? "♥" : "♡"}
+                </button>
+              </div>
+            ) : (
+              <p className="min-w-0 truncate text-sm text-white/90">
+                <span className="font-semibold" style={{ color: cards.color }}>
+                  {cards.title}
+                </span>
+                <span className="ml-2 text-white/50">{cards.subtitle}</span>
+              </p>
+            )}
+            <div className="flex shrink-0 items-center gap-3">
               {/* 재생 컨트롤 — 이전 곡 / 재생·일시정지 / 다음 곡 */}
               <div className="flex items-center gap-2">
                 <button
@@ -1962,6 +1998,16 @@ export default function GalaxyCanvas({
                   aria-label="볼륨"
                 />
               </div>
+              {/* 카드 목록 내리기/올리기 */}
+              <button
+                type="button"
+                onClick={() => setCardsCollapsed((c) => !c)}
+                className="rounded-full border border-white/15 px-2.5 py-0.5 text-xs text-white/70 transition hover:bg-white/10 hover:text-white"
+                aria-label={cardsCollapsed ? "곡 목록 올리기" : "곡 목록 내리기"}
+                title={cardsCollapsed ? "곡 목록 올리기" : "곡 목록 내리기"}
+              >
+                {cardsCollapsed ? "▲" : "▼"}
+              </button>
               <button
                 type="button"
                 onClick={() => setCards(null)}
