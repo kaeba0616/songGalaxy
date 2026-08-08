@@ -20,6 +20,8 @@ interface SongsSearchParams {
   page?: string;
   /** 방금 "은하에 추가"로 편입한 곡 id — 그 곡 버튼을 "추가했어요"로 표시 */
   added?: string;
+  /** 편입 실패 안내 (외부 API 오류·스토어에 없는 곡) */
+  importError?: string;
 }
 
 /** 곡 목록 브라우저 — 검색·성단/장르 필터·정렬·페이지네이션 (이슈 #6) */
@@ -242,6 +244,11 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
             <p className="mb-3 text-xs text-white/40">
               아직 은하에 없는 곡이면 추가해서 새 별로 태어나게 할 수 있어요
             </p>
+            {params.importError && (
+              <p className="mb-3 rounded-xl border border-red-300/30 bg-red-500/10 px-4 py-2 text-xs text-red-200">
+                ⚠ 곡을 추가하지 못했어요. 잠시 후 다시 시도해주세요.
+              </p>
+            )}
             <ul className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-dashed border-white/15 bg-white/[0.02]">
               {external.map((ext) => (
                 <li key={ext.itunesId} className="flex items-center gap-4 px-4 py-3">

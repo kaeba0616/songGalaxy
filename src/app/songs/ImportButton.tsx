@@ -16,7 +16,9 @@ export default function ImportButton() {
     <button
       type="submit"
       onClick={() => {
-        setClicked(true);
+        // 주의: 여기서 동기로 disabled를 켜면 폼 제출 자체가 취소된다 —
+        // 제출이 시작된 다음 틱에 busy 상태를 켠다
+        setTimeout(() => setClicked(true), 0);
         // 편입 실패(외부 API 오류) 시 버튼이 영영 갇히지 않게 잠시 후 복구
         setTimeout(() => setClicked(false), 15_000);
       }}

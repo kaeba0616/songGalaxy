@@ -10,14 +10,19 @@ import { importFromItunes } from "@/server/import-song";
 export async function importSongAction(formData: FormData): Promise<void> {
   const itunesId = Number(formData.get("itunesId"));
   if (!Number.isInteger(itunesId) || itunesId <= 0) return;
-  const songId = await importFromItunes(itunesId);
-  if (!songId) return;
+  let songId: number | null = null;
+  try {
+    songId = await importFromItunes(itunesId);
+  } catch {
+    // 외부 API 실패 — 아래에서 importError로 안내
+  }
   // 현재 검색 상태를 유지한 채 복귀 (+ 방금 추가한 곡 표시, 외부 검색 섹션으로 스크롤)
   const sp = new URLSearchParams();
   for (const key of ["q", "field", "cluster", "genre", "sort", "page"] as const) {
     const value = formData.get(key);
     if (typeof value === "string" && value) sp.set(key, value);
   }
-  sp.set("added", String(songId));
+  if (songId) sp.set("added", String(songId));
+  else sp.set("importError", "1");
   redirect(`/songs?${sp.toString()}#external`);
 }

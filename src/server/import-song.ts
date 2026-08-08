@@ -33,6 +33,9 @@ interface ItunesTrack {
   trackExplicitness?: string;
 }
 
+/** 스토어 폴백 순서 — 검색과 편입(lookup)이 반드시 같은 체인을 쓴다 */
+const ITUNES_COUNTRIES = ["KR", "JP", "US"] as const;
+
 async function itunesFetch(path: string): Promise<ItunesTrack[]> {
   const res = await fetch(`https://itunes.apple.com/${path}`, {
     signal: AbortSignal.timeout(6000),
@@ -49,7 +52,7 @@ async function itunesFetch(path: string): Promise<ItunesTrack[]> {
 export async function searchExternal(q: string, limit = 5): Promise<ExternalSong[]> {
   const term = encodeURIComponent(q);
   let tracks: ItunesTrack[] = [];
-  for (const country of ["KR", "JP", "US"]) {
+  for (const country of ITUNES_COUNTRIES) {
     tracks = await itunesFetch(`search?term=${term}&entity=song&limit=${limit}&country=${country}`);
     if (tracks.length > 0) break;
   }
@@ -90,9 +93,12 @@ export async function importFromItunes(itunesId: number): Promise<number | null>
     .where(and(eq(schema.songs.source, SOURCE), eq(schema.songs.sourceId, sourceId)));
   if (existing) return existing.id;
 
-  const [track] = await itunesFetch(`lookup?id=${itunesId}&country=KR`).then(async (r) =>
-    r.length > 0 ? r : itunesFetch(`lookup?id=${itunesId}&country=JP`),
-  );
+  // 검색과 동일한 스토어 폴백 — US에서 검색된 곡도 편입 가능해야 한다
+  let track: ItunesTrack | undefined;
+  for (const country of ITUNES_COUNTRIES) {
+    [track] = await itunesFetch(`lookup?id=${itunesId}&country=${country}`);
+    if (track) break;
+  }
   if (!track?.trackId || !track.trackName || !track.artistName) return null;
 
   const genre = itunesGenreToGenre(track.primaryGenreName ?? "");
