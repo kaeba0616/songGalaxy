@@ -1775,7 +1775,7 @@ export default function GalaxyCanvas({
 
       {/* 상단 오버레이 — 은하에서는 타이틀, 행성에서는 정보 패널 (이슈 #10-1) */}
       {skyInfo ? (
-        <div className="pointer-events-none absolute left-4 top-4 max-w-xs rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white backdrop-blur">
+        <div className="pointer-events-none absolute left-4 top-4 max-w-[55%] rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white backdrop-blur sm:max-w-xs">
           <p className="text-[11px] tracking-widest text-white/40">PLANET</p>
           <h1 className="mt-0.5 text-lg font-semibold">✦ {skyInfo.nickname}의 행성</h1>
           {skyInfo.likesCount != null && (
@@ -1807,7 +1807,7 @@ export default function GalaxyCanvas({
           )}
         </div>
       ) : (
-        <div className="pointer-events-none absolute left-4 top-4 text-white/90">
+        <div className="pointer-events-none absolute left-4 top-4 max-w-[38%] text-white/90 sm:max-w-none">
           <h1 className="text-lg font-semibold tracking-wide">songGalaxy</h1>
           {status === "ready" && (
             <p className="text-xs text-white/50">{songCount.toLocaleString()}곡이 떠 있는 은하 · 장르를 클릭해 들어가보세요</p>
@@ -1820,7 +1820,8 @@ export default function GalaxyCanvas({
         </div>
       )}
 
-      <div className="absolute right-4 top-4 z-10 flex gap-2">
+      {/* 모바일: 좁은 화면에서는 오른쪽 정렬로 줄바꿈해 타이틀과 겹치지 않게 */}
+      <div className="absolute right-4 top-4 z-10 flex max-w-[60%] flex-wrap justify-end gap-2 sm:max-w-none">
         {authState.authenticated ? (
           /* 프로필 드롭다운 — 계정 관련 항목을 하나로 묶는다 */
           <div ref={menuRef} className="relative">
@@ -2054,7 +2055,7 @@ export default function GalaxyCanvas({
                 <span className="font-semibold" style={{ color: cards.color }}>
                   {cards.title}
                 </span>
-                <span className="ml-2 text-white/50">{cards.subtitle}</span>
+                <span className="ml-2 hidden text-white/50 sm:inline">{cards.subtitle}</span>
               </p>
             )}
             <div className="flex shrink-0 items-center gap-3">
@@ -2106,7 +2107,7 @@ export default function GalaxyCanvas({
                   step={0.05}
                   value={volume}
                   onChange={(e) => changeVolume(Number(e.target.value))}
-                  className="h-1 w-20 cursor-pointer accent-amber-200"
+                  className="hidden h-1 w-20 cursor-pointer accent-amber-200 sm:block"
                   aria-label="볼륨"
                 />
               </div>
@@ -2145,7 +2146,7 @@ export default function GalaxyCanvas({
             <div
               ref={cardScrollRef}
               onScroll={onCardScroll}
-              className="scrollbar-none flex snap-x gap-3 overflow-x-auto scroll-smooth px-16 scroll-px-16"
+              className="scrollbar-none flex snap-x gap-3 overflow-x-auto scroll-smooth px-5 scroll-px-5 sm:px-16 sm:scroll-px-16"
             >
               {cards.songs.map((song) => {
                 const m = media[song.id];
