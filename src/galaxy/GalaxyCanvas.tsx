@@ -1905,9 +1905,15 @@ export default function GalaxyCanvas({
           }}
         >
           <div className="mb-2 px-5">
+            {/* 접힘: 곡 정보와 재생 컨트롤을 하나의 컨테이너로 묶어 우측 정렬 (양끝 열이 맞는다) */}
+            <div
+              className={
+                cardsCollapsed && miniSong ? "ml-auto w-fit" : "flex items-center justify-between gap-3"
+              }
+            >
             {cardsCollapsed && miniSong && (
-              /* 접힌 상태 미니플레이어 — 곡 정보(+좋아요)는 우측 재생 컨트롤 바로 윗줄 */
-              <div className="mb-2 flex min-w-0 items-center justify-end gap-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
                 {miniMedia?.artworkUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지, 최적화 프록시 불필요
                   <img
@@ -1923,9 +1929,10 @@ export default function GalaxyCanvas({
                     ✦
                   </div>
                 )}
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-white">{miniSong.title}</p>
-                  <p className="truncate text-xs text-white/50">{miniSong.artist}</p>
+                  <div className="min-w-0 max-w-40">
+                    <p className="truncate text-sm font-medium text-white">{miniSong.title}</p>
+                    <p className="truncate text-xs text-white/50">{miniSong.artist}</p>
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -1938,18 +1945,15 @@ export default function GalaxyCanvas({
                 </button>
               </div>
             )}
-            <div className="flex items-center justify-between gap-3">
-              {cardsCollapsed && miniSong ? (
-                <span />
-              ) : (
-                <p className="min-w-0 truncate text-sm text-white/90">
-                  <span className="font-semibold" style={{ color: cards.color }}>
-                    {cards.title}
-                  </span>
-                  <span className="ml-2 text-white/50">{cards.subtitle}</span>
-                </p>
-              )}
-              <div className="flex shrink-0 items-center gap-3">
+            {!(cardsCollapsed && miniSong) && (
+              <p className="min-w-0 truncate text-sm text-white/90">
+                <span className="font-semibold" style={{ color: cards.color }}>
+                  {cards.title}
+                </span>
+                <span className="ml-2 text-white/50">{cards.subtitle}</span>
+              </p>
+            )}
+            <div className="flex shrink-0 items-center gap-3">
               {/* 재생 컨트롤 — 이전 곡 / 재생·일시정지 / 다음 곡 */}
               <div className="flex items-center gap-2">
                 <button
