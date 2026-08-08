@@ -194,6 +194,8 @@ export default function GalaxyCanvas({
   const [playingId, setPlayingId] = useState<number | null>(null);
   /** 일시정지 상태 — playingId는 유지한 채 위치만 멈춰 재개 가능 */
   const [isPaused, setIsPaused] = useState(false);
+  /** 포커스된 카드 (별 클릭·재생 이동으로 가운데 정렬된 곡) — 테두리 강조용 */
+  const [focusedCardId, setFocusedCardId] = useState<number | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [songCount, setSongCount] = useState(0);
 
@@ -236,6 +238,8 @@ export default function GalaxyCanvas({
     const container = cardScrollRef.current;
     const el = container?.children[index] as HTMLElement | undefined;
     if (!container || !el) return;
+    const song = cardsRef.current?.songs[index];
+    if (song) setFocusedCardId(song.id);
     const elLeft = el.getBoundingClientRect().left - container.getBoundingClientRect().left + container.scrollLeft;
     container.scrollTo({
       left: elLeft - container.clientWidth / 2 + el.clientWidth / 2,
@@ -400,6 +404,7 @@ export default function GalaxyCanvas({
   // 카드 목록 미러 + 카드가 닫히면 재생도 정지
   useEffect(() => {
     cardsRef.current = cards;
+    setFocusedCardId(null); // 목록이 바뀌면 이전 포커스 해제 (필요 시 scrollToCard가 다시 세팅)
     if (!cards) {
       audioRef.current?.pause();
       setPlayingId(null);
@@ -1989,7 +1994,7 @@ export default function GalaxyCanvas({
                 return (
                   <div
                     key={song.id}
-                    className="relative w-40 shrink-0 snap-start overflow-hidden rounded-xl border border-white/10 bg-white/5 text-left backdrop-blur transition hover:border-white/30 hover:bg-white/10"
+                    className={`relative w-40 shrink-0 snap-start overflow-hidden rounded-xl border ${focusedCardId === song.id ? "border-white/30" : "border-white/10"} bg-white/5 text-left backdrop-blur transition hover:border-white/30 hover:bg-white/10`}
                   >
                     {/* 카드 클릭 → 곡 상세 페이지 */}
                     <a href={`/songs/${song.id}`} className="block" aria-label={`${song.title} 상세 보기`}>
