@@ -33,6 +33,8 @@ body {
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
   transition: opacity 0.25s ease;
   text-shadow: 0 0 8px rgba(0, 0, 0, 0.9);
   will-change: transform, opacity;
