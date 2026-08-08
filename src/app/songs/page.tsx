@@ -17,6 +17,8 @@ interface SongsSearchParams {
   genre?: string;
   sort?: string;
   page?: string;
+  /** 방금 "은하에 추가"로 편입한 곡 id — 그 곡 버튼을 "추가했어요"로 표시 */
+  added?: string;
 }
 
 /** 곡 목록 브라우저 — 검색·성단/장르 필터·정렬·페이지네이션 (이슈 #6) */
@@ -231,7 +233,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
 
         {/* 은하 밖에서 검색 — iTunes 결과를 새 별로 편입 (신인·최신곡 커버) */}
         {external.length > 0 && (
-          <section className="mt-8">
+          <section className="mt-8" id="external">
             <h2 className="mb-1 text-sm font-medium text-white/70">은하 밖에서 검색</h2>
             <p className="mb-3 text-xs text-white/40">
               아직 은하에 없는 곡이면 추가해서 새 별로 태어나게 할 수 있어요
@@ -258,13 +260,19 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
                   {ext.existingSongId ? (
                     <Link
                       href={`/songs/${ext.existingSongId}`}
-                      className="shrink-0 rounded-full border border-white/15 px-3.5 py-1.5 text-xs text-white/60 transition hover:bg-white/10"
+                      className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs transition ${String(ext.existingSongId) === params.added ? "border-amber-200/50 bg-amber-100/15 text-amber-100 hover:bg-amber-100/25" : "border-white/15 text-white/60 hover:bg-white/10"}`}
                     >
-                      이미 있어요 →
+                      {String(ext.existingSongId) === params.added ? "✓ 추가했어요 →" : "이미 있어요 →"}
                     </Link>
                   ) : (
                     <form action={importSongAction}>
                       <input type="hidden" name="itunesId" value={ext.itunesId} />
+                      {/* 현재 검색 상태 유지용 — 추가 후 같은 화면으로 복귀 */}
+                      <input type="hidden" name="q" value={q} />
+                      <input type="hidden" name="field" value={field} />
+                      <input type="hidden" name="cluster" value={cluster?.slug ?? ""} />
+                      <input type="hidden" name="genre" value={genre ?? ""} />
+                      <input type="hidden" name="sort" value={sort} />
                       <button
                         type="submit"
                         className="shrink-0 rounded-full border border-white/25 bg-white/10 px-3.5 py-1.5 text-xs transition hover:bg-white/20"
