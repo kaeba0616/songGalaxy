@@ -52,6 +52,12 @@ body {
   font-size: 0.68rem;
   color: rgba(255, 255, 255, 0.85);
 }
+/* 밤하늘 모드의 하이라이트 곡 라벨 — 조금 더 크고 따뜻하게 */
+.galaxy-label.song.sky {
+  font-size: 0.78rem;
+  color: rgba(255, 238, 200, 0.95);
+  text-shadow: 0 0 10px rgba(255, 215, 140, 0.7), 0 0 4px rgba(0, 0, 0, 0.9);
+}
 .galaxy-label.clickable {
   cursor: pointer;
 }

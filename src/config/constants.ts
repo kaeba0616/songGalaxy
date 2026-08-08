@@ -19,3 +19,6 @@ export const GALAXY_RADIUS = 1_000;
 export const RECENT_LIKE_WEIGHT = 1.5;
 /** "최근"으로 간주하는 좋아요 개수 */
 export const RECENT_LIKE_WINDOW = 10;
+
+/** 행성 착륙 밤하늘에 밝히는 최근 좋아요 곡 수 (이슈 #9, D16) */
+export const NIGHT_SKY_SONG_LIMIT = 20;

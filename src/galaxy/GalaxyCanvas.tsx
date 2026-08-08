@@ -126,6 +126,7 @@ export default function GalaxyCanvas({
   const cardScrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const resetRef = useRef<(() => void) | null>(null);
+  const exitSkyRef = useRef<(() => void) | null>(null);
   const flySongRef = useRef<((index: number) => void) | null>(null);
   const enrichRequested = useRef<Set<number>>(new Set());
   /** 오디오 onended 콜백에서 최신 상태를 읽기 위한 미러 (stale closure 방지) */
@@ -141,6 +142,10 @@ export default function GalaxyCanvas({
     star: null,
   });
   const [toast, setToast] = useState<string | null>(null);
+  /** 밤하늘 모드 정보 (착륙 중/완료 시 세팅) — 헤더 버튼 전환용 */
+  const [skyInfo, setSkyInfo] = useState<{ nickname: string } | null>(null);
+  /** 착륙 진입 플래시 오버레이 */
+  const [flash, setFlash] = useState(false);
   const [selected, setSelected] = useState<SelectedSong | null>(null);
   const [artistInfo, setArtistInfo] = useState<ArtistInfo | null>(null);
   const [cards, setCards] = useState<CardData | null>(null);
@@ -548,14 +553,20 @@ export default function GalaxyCanvas({
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
-    scene.add(new THREE.Points(starGeo, starMat));
+    const starPoints = new THREE.Points(starGeo, starMat);
+    scene.add(starPoints);
 
-    const userStars: {
+    interface StarEntry {
       data: GalaxyStar;
       cur: THREE.Vector3;
       target: THREE.Vector3;
       label: HTMLDivElement;
-    }[] = [];
+    }
+    const userStars: StarEntry[] = [];
+    // 밤하늘 모드 상태 (이슈 #9) — 값 할당은 아래 착륙 기계부에서
+    let skyActive = false;
+    let skyStarPos: THREE.Vector3 | null = null;
+    let dimScale = 1; // 성운 글로우 dim 배율 (밤하늘 모드에서 축소)
     const upsertStar = (star: GalaxyStar) => {
       const target = new THREE.Vector3(star.x, star.y, star.z);
       const existing = userStars.find((s) => s.data.userId === star.userId);
@@ -565,12 +576,15 @@ export default function GalaxyCanvas({
         return;
       }
       if (userStars.length >= STAR_CAP) return;
-      userStars.push({
+      const entry: StarEntry = {
         data: star,
         cur: target.clone(),
         target,
-        label: makeLabel(star.nickname, "star"),
-      });
+        label: null as unknown as HTMLDivElement,
+      };
+      // 닉네임 라벨 클릭 = 그 별에 착륙
+      entry.label = makeLabel(star.nickname, "star", undefined, () => landOnStar(entry));
+      userStars.push(entry);
       starGeo.setDrawRange(0, userStars.length);
     };
     starApiRef.current = upsertStar;
@@ -589,6 +603,10 @@ export default function GalaxyCanvas({
       };
     };
     resetRef.current = () => {
+      if (skyActive || pendingSky) {
+        exitSky();
+        return;
+      }
       setSelected(null);
       setCards(null);
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
@@ -597,8 +615,174 @@ export default function GalaxyCanvas({
     flySongRef.current = (index: number) => {
       if (!positions || !payload) return;
       setSelected({ title: payload.songs.title[index], artist: payload.songs.artist[index] });
-      flyTo(new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]), 45);
+      const p = new THREE.Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
+      if (skyActive && skyStarPos) {
+        // 밤하늘 모드: 별 위에 선 채로 그 곡 방향으로 시선만 회전
+        const dir = p.clone().sub(skyStarPos).normalize();
+        fly = {
+          fromPos: camera.position.clone(),
+          toPos: camera.position.clone(),
+          fromTarget: controls.target.clone(),
+          toTarget: skyStarPos.clone().addScaledVector(dir, 45),
+          start: performance.now(),
+        };
+        return;
+      }
+      flyTo(p, 45);
     };
+
+    // ── 행성 착륙: 그 사람의 밤하늘 (이슈 #9) ─────────────────────────
+    let skyHighlight: THREE.Points | null = null;
+    let skyLabels: { el: HTMLDivElement; pos: THREE.Vector3 }[] = [];
+    let landingTimers: number[] = [];
+    let pendingSky: { entry: StarEntry; songIds: number[] | null } | null = null;
+    let flightDone = false;
+
+    /** 밤하늘 진입 (dim + 하이라이트 + 1인칭 지평선 카메라) */
+    const enterSky = (entry: StarEntry, songIds: number[]) => {
+      if (!payload || !positions) return;
+      skyActive = true;
+      skyStarPos = entry.cur.clone();
+      fly = null;
+      dimScale = 0.12;
+      if (points) (points.material as THREE.ShaderMaterial).uniforms.uAlpha.value = 0.09;
+
+      // 최근 좋아요 곡 하이라이트 레이어 + 제목 라벨
+      const idxs = songIds
+        .map((id) => payload!.songs.id.indexOf(id))
+        .filter((i) => i >= 0);
+      const n = idxs.length;
+      const hPos = new Float32Array(n * 3);
+      const hCol = new Float32Array(n * 3);
+      const hSize = new Float32Array(n);
+      idxs.forEach((si, k) => {
+        hPos[k * 3] = positions![si * 3];
+        hPos[k * 3 + 1] = positions![si * 3 + 1];
+        hPos[k * 3 + 2] = positions![si * 3 + 2];
+        hCol.set([1, 0.95, 0.78], k * 3);
+        hSize[k] = 6 + (payload!.songs.popularity[si] / 100) * 4;
+      });
+      skyHighlight = makePointsLayer(hPos, hCol, hSize, 1);
+      scene.add(skyHighlight);
+      skyLabels = idxs.map((si) => ({
+        el: makeLabel(payload!.songs.title[si], "song sky"),
+        pos: new THREE.Vector3(positions![si * 3], positions![si * 3 + 1], positions![si * 3 + 2]),
+      }));
+
+      // 1인칭 시점: 카메라는 별 표면 바로 위에 서고, 시선은 "가장 최근 좋아요 곡"을 정면으로.
+      // (별은 곡들의 중심점이라 방향 평균이 0에 수렴 — 최근 곡이 가장 의미 있는 첫 시선)
+      const up = new THREE.Vector3(0, 1, 0);
+      camera.position.copy(skyStarPos).addScaledVector(up, 4);
+      const firstIdx = idxs[0];
+      const viewDir =
+        firstIdx != null
+          ? new THREE.Vector3(
+              positions![firstIdx * 3] - skyStarPos.x,
+              positions![firstIdx * 3 + 1] - skyStarPos.y,
+              positions![firstIdx * 3 + 2] - skyStarPos.z,
+            ).normalize()
+          : new THREE.Vector3(1, 0, 0);
+      controls.target.copy(skyStarPos).addScaledVector(viewDir, 45);
+      controls.minDistance = 30;
+      controls.maxDistance = 70;
+
+      // 하단 카드: ○○의 밤하늘 (최근 좋아요 순서 유지)
+      setCards({
+        title: `✦ ${entry.data.nickname}의 밤하늘`,
+        subtitle: `최근 좋아요 ${n}곡`,
+        color: "#ffdf9e",
+        songs: idxs.map((si) => ({
+          index: si,
+          id: payload!.songs.id[si],
+          title: payload!.songs.title[si],
+          artist: payload!.songs.artist[si],
+          popularity: payload!.songs.popularity[si],
+        })),
+      });
+      setSkyInfo({ nickname: entry.data.nickname });
+      setSelected(null);
+    };
+
+    /** 착륙 시퀀스: 접근 비행 → 진입 플래시 → 밤하늘 (준비되면 진입, 클릭 시 스킵) */
+    const applySkyIfReady = () => {
+      if (pendingSky && flightDone && pendingSky.songIds != null) {
+        const { entry, songIds } = pendingSky;
+        pendingSky = null;
+        flightDone = false;
+        enterSky(entry, songIds);
+        window.setTimeout(() => setFlash(false), 250);
+      }
+    };
+    const landOnStar = (entry: StarEntry) => {
+      if (skyActive || pendingSky) return;
+      pendingSky = { entry, songIds: null };
+      setSelected(null);
+      setCards(null);
+      setSkyInfo({ nickname: entry.data.nickname });
+      // 좋아요 목록은 비행하는 동안 미리 로드
+      fetch(`/api/users/${entry.data.userId}/likes`)
+        .then((r) => (r.ok ? r.json() : { songIds: [] }))
+        .then((d: { songIds: number[] }) => {
+          if (pendingSky?.entry === entry) {
+            pendingSky.songIds = d.songIds ?? [];
+            applySkyIfReady();
+          }
+        })
+        .catch(() => {
+          if (pendingSky?.entry === entry) {
+            pendingSky.songIds = [];
+            applySkyIfReady();
+          }
+        });
+      flyTo(entry.cur.clone(), 70); // 접근 비행
+      landingTimers.push(window.setTimeout(() => setFlash(true), 1100)); // 도착 직전 플래시
+      landingTimers.push(
+        window.setTimeout(() => {
+          flightDone = true;
+          applySkyIfReady();
+        }, 1400),
+      );
+    };
+    /** 연출 중 클릭 → 즉시 완성 상태로 스킵 (D19) */
+    const skipLanding = () => {
+      landingTimers.forEach(clearTimeout);
+      landingTimers = [];
+      setFlash(false);
+      flightDone = true;
+      applySkyIfReady(); // songIds가 아직이면 fetch 완료 시 진입
+    };
+
+    /** 밤하늘에서 은하로 복귀 */
+    const exitSky = () => {
+      landingTimers.forEach(clearTimeout);
+      landingTimers = [];
+      pendingSky = null;
+      flightDone = false;
+      setFlash(false);
+      if (!skyActive) {
+        setSkyInfo(null);
+        return;
+      }
+      skyActive = false;
+      skyStarPos = null;
+      dimScale = 1;
+      if (points) (points.material as THREE.ShaderMaterial).uniforms.uAlpha.value = 0.95;
+      if (skyHighlight) {
+        scene.remove(skyHighlight);
+        skyHighlight.geometry.dispose();
+        (skyHighlight.material as THREE.Material).dispose();
+        skyHighlight = null;
+      }
+      skyLabels.forEach((l) => l.el.remove());
+      skyLabels = [];
+      controls.minDistance = 20;
+      controls.maxDistance = 6000;
+      setSkyInfo(null);
+      setCards(null);
+      setSelected(null);
+      flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
+    };
+    exitSkyRef.current = exitSky;
 
     /** 특정 테마(성단 또는 세부 장르)에 속한 곡 인덱스를 인기순 카드 데이터로 만든다 */
     const collectSongs = (match: (subThemeId: number) => boolean): CardSong[] => {
@@ -662,12 +846,27 @@ export default function GalaxyCanvas({
       const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
       downAt = null;
       if (moved > 5) return;
+      // 착륙 연출 중 클릭 → 스킵 (D19)
+      if (pendingSky) {
+        skipLanding();
+        return;
+      }
       const rect = renderer.domElement.getBoundingClientRect();
       const ndc = new THREE.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       raycaster.setFromCamera(ndc, camera);
+      // 유저 별 우선 판정 (은하 모드에서만 착륙)
+      if (!skyActive && userStars.length > 0) {
+        raycaster.params.Points.threshold = 14;
+        const starHit = raycaster.intersectObject(starPoints)[0];
+        raycaster.params.Points.threshold = 6;
+        if (starHit?.index != null && starHit.index < userStars.length) {
+          landOnStar(userStars[starHit.index]);
+          return;
+        }
+      }
       const hit = raycaster.intersectObject(points)[0];
       if (hit?.index == null) return;
       flySongRef.current?.(hit.index);
@@ -776,24 +975,28 @@ export default function GalaxyCanvas({
       }
       controls.update();
 
-      // LOD 라벨 (매 2프레임)
+      // LOD 라벨 (매 2프레임) — 밤하늘 모드에서는 성단/장르 라벨 숨김
       if (frame % 2 === 0) {
         for (const l of clusterLabels) {
           const d = camera.position.distanceTo(l.pos);
           const r = l.theme.radius;
           // 멀면 보이고, 성단 클릭 도착 지점(1.5R)부터는 사라져 세부 장르에 자리를 내준다
-          placeLabel(l.el, l.pos, (d - r * 1.5) / (r * 1.1));
+          placeLabel(l.el, l.pos, skyActive ? 0 : (d - r * 1.5) / (r * 1.1));
         }
         for (const l of subLabels) {
           const dParent = camera.position.distanceTo(new THREE.Vector3(l.parent.x, l.parent.y, l.parent.z));
           const d = camera.position.distanceTo(l.pos);
           const near = 1 - (dParent - l.parent.radius * 0.6) / (l.parent.radius * 1.8); // 성단 접근도 (2.4R부터 서서히)
           const notInside = (d - l.theme.radius * 0.5) / (l.theme.radius * 0.8); // 세부 테마 진입 시 페이드
-          placeLabel(l.el, l.pos, Math.min(near, notInside));
+          placeLabel(l.el, l.pos, skyActive ? 0 : Math.min(near, notInside));
+        }
+        // 밤하늘 하이라이트 곡 라벨
+        for (const l of skyLabels) {
+          placeLabel(l.el, l.pos, 0.9);
         }
       }
-      // 곡 제목 라벨 (매 12프레임, 가장 가까운 곡)
-      if (frame % 12 === 0 && positions && payload) {
+      // 곡 제목 라벨 (매 12프레임, 가장 가까운 곡) — 밤하늘 모드에서는 하이라이트 라벨이 대신함
+      if (frame % 12 === 0 && positions && payload && !skyActive) {
         const nearest: { d: number; i: number }[] = [];
         const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
         const maxD2 = SONG_LABEL_DISTANCE * SONG_LABEL_DISTANCE;
@@ -812,7 +1015,7 @@ export default function GalaxyCanvas({
       }
       if (positions) {
         for (const slot of songLabels) {
-          if (slot.index < 0) {
+          if (slot.index < 0 || skyActive) {
             slot.el.style.opacity = "0";
             continue;
           }
@@ -825,7 +1028,7 @@ export default function GalaxyCanvas({
       // 미학 폴리시 (#8): 배경 별 반짝임 + 성운 글로우의 느린 숨쉬기
       const t = now / 1000;
       if (bgStarsMat) bgStarsMat.uniforms.uTime.value = t;
-      if (haloMat) haloMat.uniforms.uAlpha.value = 0.055 + 0.02 * Math.sin(t * 0.7);
+      if (haloMat) haloMat.uniforms.uAlpha.value = (0.055 + 0.02 * Math.sin(t * 0.7)) * dimScale;
       if (frame % 10 === 0) drawMinimap();
 
       // 유저 별: 목표 좌표로 부드럽게 이동 + 닉네임 라벨
@@ -943,14 +1146,33 @@ export default function GalaxyCanvas({
         >
           곡 목록
         </a>
-        <button
-          type="button"
-          onClick={() => resetRef.current?.()}
-          className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
-        >
-          전체 보기
-        </button>
+        {skyInfo ? (
+          <button
+            type="button"
+            onClick={() => exitSkyRef.current?.()}
+            className="rounded-full border border-amber-200/40 bg-amber-100/15 px-4 py-1.5 text-sm text-amber-100 backdrop-blur transition hover:bg-amber-100/25"
+          >
+            은하로 나가기
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => resetRef.current?.()}
+            className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
+          >
+            전체 보기
+          </button>
+        )}
       </div>
+
+      {/* 착륙 진입 플래시 (금빛 커튼) */}
+      <div
+        className={`pointer-events-none absolute inset-0 z-20 transition-opacity duration-300 ${flash ? "opacity-100" : "opacity-0"}`}
+        style={{
+          background:
+            "radial-gradient(circle at 50% 55%, rgba(255,236,190,0.98) 0%, rgba(255,214,140,0.9) 35%, rgba(30,22,8,0.95) 100%)",
+        }}
+      />
 
       {/* 별 탄생 등 알림 토스트 */}
       {toast && (
