@@ -23,6 +23,8 @@ const OVERVIEW_DISTANCE = 2600;
 const SONG_LABEL_DISTANCE = 130;
 /** 동시에 띄우는 곡 라벨 수 */
 const SONG_LABEL_POOL = 24;
+/** 곡 더블클릭 시 확대 거리 — 제목 라벨이 또렷이 보이는 근접 줌 (라벨 투명도 ≈ 1 - d/130) */
+const SONG_ZOOM_DISTANCE = 16;
 /** 하단 카드 캐러셀에 띄우는 최대 곡 수 (인기순) */
 const CARD_LIMIT = 150;
 /** 한 번에 보강 요청할 카드 수 (/api/enrich의 MAX_IDS와 일치) */
@@ -190,6 +192,8 @@ export default function GalaxyCanvas({
   }, [cards]);
   const [media, setMedia] = useState<Record<number, Media>>({});
   const [playingId, setPlayingId] = useState<number | null>(null);
+  /** 일시정지 상태 — playingId는 유지한 채 위치만 멈춰 재개 가능 */
+  const [isPaused, setIsPaused] = useState(false);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [songCount, setSongCount] = useState(0);
 
@@ -251,6 +255,7 @@ export default function GalaxyCanvas({
     audio.src = previewUrl;
     audio.onended = () => void playNextRef.current(songId);
     setPlayingId(songId);
+    setIsPaused(false);
     return audio.play();
   }, []);
 
@@ -327,12 +332,18 @@ export default function GalaxyCanvas({
     setPlayingId(null); // 목록 끝 — 자동 재생 종료
   };
 
-  /** 미리듣기 토글 (한 번에 한 곡만, 끝나면 다음 곡 자동 재생) */
+  /** 미리듣기 토글 (한 번에 한 곡만, 끝나면 다음 곡 자동 진행) — 같은 곡은 일시정지/재개 */
   const togglePreview = useCallback(
     (songId: number, previewUrl: string) => {
-      if (playingId === songId) {
-        audioRef.current?.pause();
-        setPlayingId(null);
+      const audio = audioRef.current;
+      if (playingId === songId && audio) {
+        if (audio.paused) {
+          setIsPaused(false);
+          audio.play().catch(() => setPlayingId(null));
+        } else {
+          audio.pause();
+          setIsPaused(true);
+        }
         return;
       }
       playSong(songId, previewUrl).catch(() => setPlayingId(null));
@@ -340,12 +351,59 @@ export default function GalaxyCanvas({
     [playingId, playSong],
   );
 
+  /** 헤더 재생 컨트롤 — 이전/다음 곡 (미리듣기 없는 곡은 건너뜀) */
+  const playStep = useCallback(
+    async (dir: -1 | 1) => {
+      const cardData = cardsRef.current;
+      if (!cardData || cardData.songs.length === 0) return;
+      const idx = playingId !== null ? cardData.songs.findIndex((s) => s.id === playingId) : -1;
+      let i = idx < 0 ? (dir === 1 ? 0 : cardData.songs.length - 1) : idx + dir;
+      for (; i >= 0 && i < cardData.songs.length; i += dir) {
+        const song = cardData.songs[i];
+        let m: Media | undefined = mediaRef.current[song.id];
+        if (!m) {
+          const batch =
+            dir === 1
+              ? cardData.songs.slice(i, i + ENRICH_BATCH)
+              : cardData.songs.slice(Math.max(0, i - ENRICH_BATCH + 1), i + 1);
+          await fetchMedia(batch.map((s) => s.id));
+          m = mediaRef.current[song.id];
+        }
+        // 대기 중 카드 목록이 바뀌었으면 진행 중단
+        if (cardsRef.current !== cardData) return;
+        if (m?.previewUrl) {
+          scrollToCard(i);
+          playSong(song.id, m.previewUrl).catch(() => setPlayingId(null));
+          return;
+        }
+      }
+    },
+    [playingId, fetchMedia, playSong, scrollToCard],
+  );
+
+  /** 헤더 재생/일시정지 — 재생 중이면 토글, 없으면 목록 첫 미리듣기 곡부터 시작 */
+  const toggleMainPlay = useCallback(() => {
+    const audio = audioRef.current;
+    if (playingId !== null && audio && audio.src) {
+      if (audio.paused) {
+        setIsPaused(false);
+        audio.play().catch(() => setPlayingId(null));
+      } else {
+        audio.pause();
+        setIsPaused(true);
+      }
+      return;
+    }
+    void playStep(1);
+  }, [playingId, playStep]);
+
   // 카드 목록 미러 + 카드가 닫히면 재생도 정지
   useEffect(() => {
     cardsRef.current = cards;
     if (!cards) {
       audioRef.current?.pause();
       setPlayingId(null);
+      setIsPaused(false);
     }
   }, [cards]);
 
@@ -655,6 +713,8 @@ export default function GalaxyCanvas({
 
     // fly-to 애니메이션 상태
     let fly: { fromPos: THREE.Vector3; toPos: THREE.Vector3; fromTarget: THREE.Vector3; toTarget: THREE.Vector3; start: number } | null = null;
+    /** 최근 클릭/이동한 곡 — 밀집 지역에서도 제목 라벨이 풀에서 밀려나지 않게 항상 포함 */
+    let focusedSongIndex = -1;
     const flyTo = (target: THREE.Vector3, distance: number) => {
       const dir = camera.position.clone().sub(target).normalize();
       if (dir.lengthSq() < 1e-6) dir.set(0, 0.3, 1).normalize();
@@ -714,6 +774,7 @@ export default function GalaxyCanvas({
       }
       // 은하 모드: 곡으로 비행 + 행성과 동일하게 카드 가운데 포커스
       flyTo(p, 45);
+      focusedSongIndex = index;
       const currentCards = cardsRef.current;
       const inList = currentCards ? currentCards.songs.findIndex((s) => s.index === index) : -1;
       if (currentCards && inList >= 0) {
@@ -1340,8 +1401,19 @@ export default function GalaxyCanvas({
         if (starHit?.index != null && starHit.index < userStars.length) return;
       }
       const hit = raycaster.intersectObject(points)[0];
-      // 카드 열기·포커스는 더블클릭의 첫 클릭(flySong)이 이미 처리 — 여기선 재생만
-      if (hit?.index != null) playRequestRef.current?.(payload.songs.id[hit.index]);
+      // 카드 열기·포커스는 더블클릭의 첫 클릭(flySong)이 이미 처리 — 여기선 재생 + 근접 줌
+      if (hit?.index != null) {
+        playRequestRef.current?.(payload.songs.id[hit.index]);
+        if (positions) {
+          // 곡 제목 라벨이 또렷이 보이는 거리까지 확대
+          const p = new THREE.Vector3(
+            positions[hit.index * 3],
+            positions[hit.index * 3 + 1],
+            positions[hit.index * 3 + 2],
+          );
+          flyTo(p, SONG_ZOOM_DISTANCE);
+        }
+      }
     };
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
@@ -1486,6 +1558,13 @@ export default function GalaxyCanvas({
           if (d2 < maxD2) nearest.push({ d: d2, i });
         }
         nearest.sort((a, b) => a.d - b.d);
+        // 포커스 곡은 밀집 지역에서 24위 밖으로 밀려나도 항상 라벨을 가진다
+        if (
+          focusedSongIndex >= 0 &&
+          !nearest.slice(0, songLabels.length).some((x) => x.i === focusedSongIndex)
+        ) {
+          nearest.unshift({ d: 0, i: focusedSongIndex });
+        }
         for (let k = 0; k < songLabels.length; k++) {
           const slot = songLabels[k];
           const pick = nearest[k];
@@ -1826,6 +1905,36 @@ export default function GalaxyCanvas({
               >
                 {cardsCollapsed ? "▲" : "▼"}
               </button>
+              {/* 재생 컨트롤 — 이전 곡 / 재생·일시정지 / 다음 곡 */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void playStep(-1)}
+                  className="text-sm text-white/70 transition hover:text-white"
+                  aria-label="이전 곡"
+                  title="이전 곡"
+                >
+                  ⏮
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleMainPlay}
+                  className="text-sm text-white/70 transition hover:text-white"
+                  aria-label={playingId !== null && !isPaused ? "일시정지" : "재생"}
+                  title={playingId !== null && !isPaused ? "일시정지" : "재생"}
+                >
+                  {playingId !== null && !isPaused ? "❚❚" : "▶"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void playStep(1)}
+                  className="text-sm text-white/70 transition hover:text-white"
+                  aria-label="다음 곡"
+                  title="다음 곡"
+                >
+                  ⏭
+                </button>
+              </div>
               {/* 볼륨 조절 (미리듣기·라디오) */}
               <div className="flex items-center gap-1.5">
                 <button
@@ -1876,7 +1985,7 @@ export default function GalaxyCanvas({
             >
               {cards.songs.map((song) => {
                 const m = media[song.id];
-                const isPlaying = playingId === song.id;
+                const isPlaying = playingId === song.id && !isPaused;
                 return (
                   <div
                     key={song.id}
