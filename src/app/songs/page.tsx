@@ -11,6 +11,8 @@ const PAGE_SIZE = 30;
 
 interface SongsSearchParams {
   q?: string;
+  /** 검색 대상 — 비우면 제목+가수 모두 */
+  field?: string;
   cluster?: string;
   genre?: string;
   sort?: string;
@@ -23,14 +25,23 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
   const q = params.q?.trim() ?? "";
   const cluster = GENRE_CLUSTERS.find((c) => c.slug === params.cluster);
   const genre = cluster?.genres.includes(params.genre ?? "") ? params.genre : undefined;
-  const sort = params.sort === "title" ? "title" : "popularity";
+  const sort =
+    params.sort === "title" ? "title" : params.sort === "recent" ? "recent" : "popularity";
+  const field = params.field === "title" || params.field === "artist" ? params.field : "";
   const page = Math.max(1, Number(params.page) || 1);
 
   const conditions: SQL[] = [];
   if (q) {
-    conditions.push(
-      or(ilike(schema.songs.title, `%${q}%`), ilike(schema.songs.artist, `%${q}%`))!,
-    );
+    // 검색 대상 필터 — 제목만/가수만/전체(제목+가수)
+    if (field === "title") {
+      conditions.push(ilike(schema.songs.title, `%${q}%`));
+    } else if (field === "artist") {
+      conditions.push(ilike(schema.songs.artist, `%${q}%`));
+    } else {
+      conditions.push(
+        or(ilike(schema.songs.title, `%${q}%`), ilike(schema.songs.artist, `%${q}%`))!,
+      );
+    }
   }
   if (genre) {
     conditions.push(eq(schema.songs.genre, genre));
@@ -51,7 +62,14 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
       })
       .from(schema.songs)
       .where(where)
-      .orderBy(sort === "title" ? asc(schema.songs.title) : desc(schema.songs.popularity))
+      .orderBy(
+        ...(sort === "title"
+          ? [asc(schema.songs.title)]
+          : sort === "recent"
+            ? // 최신순 = 발매연도 내림차순 (연도 없는 곡은 뒤로), 같은 해면 인기순
+              [sql`${schema.songs.releaseYear} DESC NULLS LAST`, desc(schema.songs.popularity)]
+            : [desc(schema.songs.popularity)]),
+      )
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db
@@ -66,7 +84,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
 
   /** 현재 필터를 유지한 채 일부 파라미터만 바꾼 URL */
   const pageUrl = (overrides: Partial<SongsSearchParams>) => {
-    const merged = { q, cluster: cluster?.slug, genre, sort, page: String(page), ...overrides };
+    const merged = { q, field, cluster: cluster?.slug, genre, sort, page: String(page), ...overrides };
     const sp = new URLSearchParams();
     for (const [key, value] of Object.entries(merged)) {
       if (value) sp.set(key, String(value));
@@ -94,6 +112,15 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
             className="min-w-48 flex-1 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm placeholder:text-white/30 focus:border-white/40 focus:outline-none"
           />
           <select
+            name="field"
+            defaultValue={field}
+            className="rounded-full border border-white/15 bg-[#0d0f1e] px-3 py-2 text-sm"
+          >
+            <option value="">제목+가수</option>
+            <option value="title">제목만</option>
+            <option value="artist">가수만</option>
+          </select>
+          <select
             name="cluster"
             defaultValue={cluster?.slug ?? ""}
             className="rounded-full border border-white/15 bg-[#0d0f1e] px-3 py-2 text-sm"
@@ -111,6 +138,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
             className="rounded-full border border-white/15 bg-[#0d0f1e] px-3 py-2 text-sm"
           >
             <option value="popularity">인기순</option>
+            <option value="recent">최신순</option>
             <option value="title">제목순</option>
           </select>
           <button
