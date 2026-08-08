@@ -1900,14 +1900,14 @@ export default function GalaxyCanvas({
         <div
           className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pb-4 pt-8 transition-transform duration-300 ease-out"
           style={{
-            /* 접힘: 상단 여백(pt-8) + 미니플레이어 줄(h-10)만 남긴다 */
-            transform: cardsCollapsed ? "translateY(calc(100% - 4.5rem))" : "translateY(0)",
+            /* 접힘: 상단 여백(pt-8) + 곡 정보 줄(h-10) + 재생 컨트롤 줄만 남긴다 */
+            transform: cardsCollapsed ? "translateY(calc(100% - 6.75rem))" : "translateY(0)",
           }}
         >
-          <div className="mb-2 flex items-center justify-between gap-3 px-5">
-            {cardsCollapsed && miniSong ? (
-              /* 접힌 상태 미니플레이어 — 지금 듣는 곡 정보 + 좋아요 */
-              <div className="flex min-w-0 items-center gap-3">
+          <div className="mb-2 px-5">
+            {cardsCollapsed && miniSong && (
+              /* 접힌 상태 미니플레이어 — 곡 정보(+좋아요)는 재생 컨트롤 윗줄 */
+              <div className="mb-2 flex min-w-0 items-center gap-3">
                 {miniMedia?.artworkUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지, 최적화 프록시 불필요
                   <img
@@ -1937,15 +1937,19 @@ export default function GalaxyCanvas({
                   {authState.likedIds.has(miniSong.id) ? "♥" : "♡"}
                 </button>
               </div>
-            ) : (
-              <p className="min-w-0 truncate text-sm text-white/90">
-                <span className="font-semibold" style={{ color: cards.color }}>
-                  {cards.title}
-                </span>
-                <span className="ml-2 text-white/50">{cards.subtitle}</span>
-              </p>
             )}
-            <div className="flex shrink-0 items-center gap-3">
+            <div className="flex items-center justify-between gap-3">
+              {cardsCollapsed && miniSong ? (
+                <span />
+              ) : (
+                <p className="min-w-0 truncate text-sm text-white/90">
+                  <span className="font-semibold" style={{ color: cards.color }}>
+                    {cards.title}
+                  </span>
+                  <span className="ml-2 text-white/50">{cards.subtitle}</span>
+                </p>
+              )}
+              <div className="flex shrink-0 items-center gap-3">
               {/* 재생 컨트롤 — 이전 곡 / 재생·일시정지 / 다음 곡 */}
               <div className="flex items-center gap-2">
                 <button
@@ -2016,6 +2020,7 @@ export default function GalaxyCanvas({
               >
                 ✕
               </button>
+              </div>
             </div>
           </div>
           <div
