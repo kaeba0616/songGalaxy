@@ -152,10 +152,20 @@ export default function GalaxyCanvas({ initialSongId }: { initialSongId?: number
     void fetchMedia(visible);
   }, [cards, fetchMedia]);
 
-  /** 재생 중인 카드가 보이도록 캐러셀 스크롤 */
+  /**
+   * 재생 중인 카드가 보이도록 캐러셀만 스크롤.
+   * scrollIntoView는 조상 요소(overflow-hidden인 페이지 루트)까지 밀어버려
+   * 화면 전체가 잘리는 버그가 있어, 컨테이너 scrollTo로 직접 계산한다.
+   */
   const scrollToCard = useCallback((index: number) => {
-    const el = cardScrollRef.current?.children[index] as HTMLElement | undefined;
-    el?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    const container = cardScrollRef.current;
+    const el = container?.children[index] as HTMLElement | undefined;
+    if (!container || !el) return;
+    const elLeft = el.getBoundingClientRect().left - container.getBoundingClientRect().left + container.scrollLeft;
+    container.scrollTo({
+      left: elLeft - container.clientWidth / 2 + el.clientWidth / 2,
+      behavior: "smooth",
+    });
   }, []);
 
   /** 미리듣기가 끝나면 다음 곡으로 자동 진행 (미리듣기 없는 곡은 건너뜀) */
