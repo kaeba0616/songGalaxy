@@ -199,18 +199,16 @@ export default function GalaxyCanvas({
   /** 우측 상단 프로필 드롭다운 열림 상태 */
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  /** 별자리 선(내 별 ↔ 좋아요 곡) 표시 여부 — localStorage 유지 */
-  const [constellationOn, setConstellationOn] = useState(true);
-  /** 씬의 별자리 선 갱신 API (three 이펙트가 채움) — null star면 선 제거 */
-  const constellationApiRef = useRef<
-    ((star: { x: number; y: number; z: number } | null, likedIds: number[]) => void) | null
-  >(null);
+  /** 좋아요 별 강조(더 크고 밝게) 표시 여부 — localStorage 유지 */
+  const [likedGlowOn, setLikedGlowOn] = useState(true);
+  /** 씬의 좋아요 별 강조 갱신 API (three 이펙트가 채움) — 빈 배열이면 강조 제거 */
+  const likedGlowApiRef = useRef<((likedIds: number[]) => void) | null>(null);
   useEffect(() => {
-    if (localStorage.getItem("songgalaxy-constellation") === "off") setConstellationOn(false);
+    if (localStorage.getItem("songgalaxy-liked-glow") === "off") setLikedGlowOn(false);
   }, []);
-  const toggleConstellation = useCallback(() => {
-    setConstellationOn((on) => {
-      localStorage.setItem("songgalaxy-constellation", on ? "off" : "on");
+  const toggleLikedGlow = useCallback(() => {
+    setLikedGlowOn((on) => {
+      localStorage.setItem("songgalaxy-liked-glow", on ? "off" : "on");
       return !on;
     });
   }, []);
@@ -471,13 +469,10 @@ export default function GalaxyCanvas({
       .catch(() => undefined);
   }, [focusMyStar]);
 
-  // 별자리 선 동기화 — 내 별·좋아요 목록·토글이 바뀌거나 씬이 준비되면 다시 그린다
+  // 좋아요 별 강조 동기화 — 좋아요 목록·토글이 바뀌거나 씬이 준비되면 다시 그린다
   useEffect(() => {
-    constellationApiRef.current?.(
-      constellationOn ? authState.star : null,
-      [...authState.likedIds],
-    );
-  }, [authState.star, authState.likedIds, constellationOn, status]);
+    likedGlowApiRef.current?.(likedGlowOn ? [...authState.likedIds] : []);
+  }, [authState.likedIds, likedGlowOn, status]);
 
   /** 좋아요 토글 — 비로그인이면 로그인으로, 별 탄생/이동은 씬에 즉시 반영 (D6·D7) */
   const toggleLike = useCallback(
@@ -776,37 +771,35 @@ export default function GalaxyCanvas({
     };
     flyToPosRef.current = (x, y, z, dist) => flyTo(new THREE.Vector3(x, y, z), dist);
 
-    // ── 별자리 선: 내 별 ↔ 좋아요 곡들 (금빛 반투명, 은하 모드 전용) ──
-    let constellation: THREE.LineSegments | null = null;
+    // ── 좋아요 별 강조: 내가 좋아요한 곡을 더 크고 밝게 (은하 모드 전용) ──
+    // 기존 포인트 위에 흰빛 섞은 색 + 2.2배 크기의 포인트를 겹쳐(additive) 또렷하게 빛낸다
+    let likedGlow: THREE.Points | null = null;
     let songIndexById: Map<number, number> | null = null;
-    constellationApiRef.current = (star, likedIds) => {
-      if (constellation) {
-        scene.remove(constellation);
-        constellation.geometry.dispose();
-        (constellation.material as THREE.Material).dispose();
-        constellation = null;
+    likedGlowApiRef.current = (likedIds) => {
+      if (likedGlow) {
+        scene.remove(likedGlow);
+        likedGlow.geometry.dispose();
+        (likedGlow.material as THREE.Material).dispose();
+        likedGlow = null;
       }
-      if (!star || !positions || !songIndexById || likedIds.length === 0) return;
-      const verts: number[] = [];
+      if (!positions || !payload || !songIndexById || likedIds.length === 0) return;
+      const themeById = new Map(payload.themes.map((t) => [t.id, t]));
+      const pos: number[] = [];
+      const col: number[] = [];
+      const siz: number[] = [];
+      const tmp = new THREE.Color();
+      const white = new THREE.Color("#ffffff");
       for (const id of likedIds) {
         const i = songIndexById.get(id);
         if (i == null) continue;
-        verts.push(star.x, star.y, star.z, positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+        pos.push(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+        tmp.set(themeById.get(payload.songs.themeId[i])?.color ?? "#ffffff").lerp(white, 0.5);
+        col.push(tmp.r, tmp.g, tmp.b);
+        siz.push((1.6 + (payload.songs.popularity[i] / 100) * 3.2) * 2.2);
       }
-      if (verts.length === 0) return;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
-      constellation = new THREE.LineSegments(
-        geo,
-        new THREE.LineBasicMaterial({
-          color: 0xffe2a8,
-          transparent: true,
-          opacity: 0.3,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        }),
-      );
-      scene.add(constellation);
+      if (pos.length === 0) return;
+      likedGlow = makePointsLayer(new Float32Array(pos), new Float32Array(col), new Float32Array(siz), 1);
+      scene.add(likedGlow);
     };
     flySongRef.current = (index: number) => {
       if (!positions || !payload) return;
@@ -1658,8 +1651,8 @@ export default function GalaxyCanvas({
         }
       }
 
-      // 별자리 선은 은하 모드에서만 (밤하늘·착륙 연출 중 숨김)
-      if (constellation) constellation.visible = !skyActive && !pendingSky;
+      // 좋아요 별 강조는 은하 모드에서만 (밤하늘·착륙 연출 중 숨김)
+      if (likedGlow) likedGlow.visible = !skyActive && !pendingSky;
 
       // 미학 폴리시 (#8): 배경 별 반짝임 + 성운 글로우의 느린 숨쉬기
       const t = now / 1000;
@@ -1870,16 +1863,14 @@ export default function GalaxyCanvas({
                     ✦ 내 별로 이동
                   </button>
                 )}
-                {authState.star && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={toggleConstellation}
-                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-                  >
-                    {constellationOn ? "🌠 별자리 숨기기" : "🌠 별자리 보이기"}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={toggleLikedGlow}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                >
+                  {likedGlowOn ? "🌟 좋아요 별 강조 끄기" : "🌟 좋아요 별 강조 켜기"}
+                </button>
                 <a
                   role="menuitem"
                   href="/me"
