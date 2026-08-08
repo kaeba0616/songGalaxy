@@ -745,10 +745,9 @@ export default function GalaxyCanvas({
       const hSize = new Float32Array(n);
       idxs.forEach((si, k) => {
         const frac = n === 1 ? 0.4 : k / (n - 1);
-        const elev = ((16 + 58 * frac) * Math.PI) / 180; // 최근(k=0)이 지평선 가까이
-        // 정면 ±120° 부채꼴 안에 골든앵글로 분산 — 조금만 둘러봐도 전부 보이게
-        const azimDeg = ((k * 137.508 + 120) % 240) - 120;
-        const azim = (azimDeg * Math.PI) / 180;
+        // 상반구 전체 사용: 최근(k=0)은 정면 눈높이, 오래될수록 천정(정수리) 쪽으로
+        const elev = ((14 + 70 * frac) * Math.PI) / 180;
+        const azim = k * 2.399963; // 골든앵글 — 방위 360° 고르게
         const r = 430;
         const p = new THREE.Vector3(
           C.x + r * Math.cos(elev) * Math.cos(azim),
@@ -800,13 +799,13 @@ export default function GalaxyCanvas({
       controls.enableZoom = false;
       controls.enablePan = false;
       controls.rotateSpeed = -0.45;
-      controls.minPolarAngle = Math.PI * 0.12; // 천정 뒤집힘 방지
+      controls.minPolarAngle = 0.02; // 정수리(천정)까지 올려다볼 수 있게
       controls.maxPolarAngle = Math.PI * 0.62; // 발밑까지 파고들지 않게
 
       // 하단 카드: ○○의 밤하늘 (최근 좋아요 순서 유지)
       setCards({
         title: `✦ ${entry.data.nickname}의 밤하늘`,
-        subtitle: `최근 좋아요 ${n}곡`,
+        subtitle: `좋아요 ${n}곡`,
         color: "#ffdf9e",
         songs: idxs.map((si) => ({
           index: si,
