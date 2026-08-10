@@ -1,7 +1,7 @@
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { env } from "@/config/env";
-import { baseTitleKey, normalizeKey, primaryArtistKey } from "@/lib/match-key";
+import { normalizeKey, primaryArtistKey, titleAliases } from "@/lib/match-key";
 import { placeSong } from "./place-song";
 
 /**
@@ -34,6 +34,8 @@ export interface ExpandStats {
   duplicate: number;
   /** 좌표를 잡지 못해 건너뛴 곡 */
   noPlacement: number;
+  /** 청취자가 너무 적어 건너뛴 곡 (표기 변형·비주류 트랙) */
+  tooQuiet: number;
   inserted: number;
   timedOut: boolean;
 }
@@ -45,6 +47,21 @@ export interface ExpandOptions {
   perArtist?: number;
   /** 이번 실행 전체 상한 (은하가 갑자기 불어나는 것을 막는다) */
   totalLimit?: number;
+  /** 이 인기도에 못 미치는 가수는 건너뛴다 (무명 1곡짜리 가수에 API 호출을 낭비하지 않기 위함) */
+  minPopularity?: number;
+  /** 특정 가수만 보강한다. 지정하면 자동 선정 대신 이 목록만 훑는다 */
+  only?: string[];
+  /**
+   * 그 가수 최고 인기곡 청취자 수의 이 비율에 못 미치면 넣지 않는다.
+   *
+   * 표기 변형(로마자·번역 제목)을 거르는 현실적인 수단이다. Last.fm은 한 곡을
+   * "サクラキミワタシ"와 "Sakura Kimi Watashi"처럼 글자가 하나도 안 겹치게
+   * 따로 등록하는데, 이런 쌍은 문자열로도 MBID로도 구분되지 않는다
+   * (실측: 중복 표기에도 MBID가 붙어 있어 MBID는 단서가 못 된다).
+   * 다만 스크로블이 원제에 몰려서 변형은 청취자가 한 자릿수 % 수준으로 적다.
+   * 부수적으로 "거의 아무도 안 듣는 곡"을 거르는 품질 기준 역할도 한다.
+   */
+  minListenerShare?: number;
   deadlineMs?: number;
   onInsert?: (title: string, artist: string, popularity: number, count: number) => void;
 }
@@ -53,6 +70,7 @@ interface LastfmTrack {
   name?: string;
   listeners?: string;
   mbid?: string;
+  artist?: { name?: string };
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -67,7 +85,12 @@ export function listenersToPopularity(listeners: number): number {
   return Math.max(1, Math.min(99, Math.round(20 * Math.log10(listeners) - 40)));
 }
 
-/** 한 아티스트의 대표곡 (인기순) */
+/**
+ * 한 아티스트의 대표곡 (인기순).
+ *
+ * autocorrect가 엉뚱한 동명 가수로 넘겨버리는 일이 있어(짧은 이름일수록 위험),
+ * 응답이 우리가 요청한 가수의 것이 맞는지 확인하고 아니면 통째로 버린다.
+ */
 async function fetchTopTracks(artist: string, limit: number): Promise<LastfmTrack[]> {
   const key = env.lastfmApiKey;
   if (!key) return [];
@@ -82,29 +105,62 @@ async function fetchTopTracks(artist: string, limit: number): Promise<LastfmTrac
   try {
     const res = await fetch(`${API}?${params}`, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return [];
-    const data = (await res.json()) as { toptracks?: { track?: LastfmTrack | LastfmTrack[] } };
+    const data = (await res.json()) as {
+      toptracks?: { track?: LastfmTrack | LastfmTrack[]; "@attr"?: { artist?: string } };
+    };
+    const wanted = primaryArtistKey(artist);
+    const corrected = data.toptracks?.["@attr"]?.artist;
+    if (corrected && primaryArtistKey(corrected) !== wanted) return [];
     const track = data.toptracks?.track;
     if (!track) return [];
-    return Array.isArray(track) ? track : [track];
+    const list = Array.isArray(track) ? track : [track];
+    // 트랙별 가수명도 확인 (컴필레이션·피처링이 섞여 들어오는 경우 방지)
+    return list.filter((t) => {
+      const name = t.artist?.name;
+      return !name || primaryArtistKey(name) === wanted;
+    });
   } catch {
     return [];
   }
 }
 
 /**
- * 은하에 곡이 많은 아티스트부터 훑는다.
- * 곡이 여럿 있는 가수일수록 그 가수의 장르·좌표가 안정적이라 결과가 좋다.
+ * 은하에 곡이 "적은" 아티스트부터 훑는다.
+ *
+ * 처음엔 곡이 많은 가수부터 훑었는데, 그런 가수는 이미 잘 채워져 있어
+ * 후보의 91%가 중복이었다. 정작 비어 있는 쪽은 곡이 한두 개뿐인 가수다
+ * (예: tuki. — 데이터셋이 2022년 스냅샷이라 2023년 데뷔 가수는 1곡뿐이었다).
+ * 같은 조건이면 대표곡 인기도가 높은 가수를 먼저 본다.
  */
-async function pickArtists(limit: number): Promise<{ artist: string; genre: string }[]> {
+async function pickArtists(
+  limit: number,
+  minPopularity: number,
+): Promise<{ artist: string; genre: string }[]> {
   const rows = await db.execute<{ artist: string; genre: string }>(sql`
     SELECT artist, mode() WITHIN GROUP (ORDER BY genre) AS genre
     FROM songs
     WHERE pos_x IS NOT NULL
     GROUP BY artist
-    ORDER BY count(*) DESC, artist
+    HAVING max(popularity) >= ${minPopularity}
+    ORDER BY count(*) ASC, max(popularity) DESC, artist
     LIMIT ${limit}
   `);
   return rows.rows;
+}
+
+/** 이름으로 지정한 가수들 (은하에 있어야 장르를 물려받을 수 있다) */
+async function namedArtists(names: string[]): Promise<{ artist: string; genre: string }[]> {
+  const out: { artist: string; genre: string }[] = [];
+  for (const name of names) {
+    const rows = await db.execute<{ artist: string; genre: string }>(sql`
+      SELECT artist, mode() WITHIN GROUP (ORDER BY genre) AS genre
+      FROM songs
+      WHERE pos_x IS NOT NULL AND lower(artist) = lower(${name})
+      GROUP BY artist
+    `);
+    out.push(...rows.rows);
+  }
+  return out;
 }
 
 export async function expandArtists(opts: ExpandOptions = {}): Promise<ExpandStats> {
@@ -118,12 +174,15 @@ export async function expandArtists(opts: ExpandOptions = {}): Promise<ExpandSta
     candidates: 0,
     duplicate: 0,
     noPlacement: 0,
+    tooQuiet: 0,
     inserted: 0,
     timedOut: false,
   };
   if (!env.lastfmApiKey) return stats;
 
-  const artists = await pickArtists(artistLimit);
+  const artists = opts.only?.length
+    ? await namedArtists(opts.only)
+    : await pickArtists(artistLimit, opts.minPopularity ?? 35);
   for (const { artist, genre } of artists) {
     if (stats.inserted >= totalLimit) break;
     if (opts.deadlineMs && Date.now() > opts.deadlineMs) {
@@ -138,25 +197,33 @@ export async function expandArtists(opts: ExpandOptions = {}): Promise<ExpandSta
       .from(schema.songs)
       .where(sql`lower(${schema.songs.artist}) = lower(${artist})`);
     const known = new Set<string>();
-    for (const row of existing) {
-      known.add(normalizeKey(row.title));
-      known.add(baseTitleKey(row.title));
-    }
+    for (const row of existing) for (const k of titleAliases(row.title)) known.add(k);
 
     const tracks = await fetchTopTracks(artist, perArtist * 4);
     await sleep(REQUEST_INTERVAL_MS);
     stats.candidates += tracks.length;
+
+    // 이 가수 최고 인기곡 기준으로 하한선을 잡는다 (응답이 인기순이라 첫 곡이 최고)
+    const topListeners = Number(tracks[0]?.listeners ?? 0);
+    const minListeners = topListeners * (opts.minListenerShare ?? 0.05);
 
     let addedForArtist = 0;
     for (const track of tracks) {
       if (addedForArtist >= perArtist || stats.inserted >= totalLimit) break;
       const title = track.name?.trim();
       if (!title) continue;
-      if (known.has(normalizeKey(title)) || known.has(baseTitleKey(title))) {
+      if (Number(track.listeners ?? 0) < minListeners) {
+        stats.tooQuiet++;
+        continue;
+      }
+      const aliases = titleAliases(title);
+      if (aliases.some((k) => known.has(k))) {
         stats.duplicate++;
         continue;
       }
-      known.add(normalizeKey(title)); // 같은 실행 안에서의 중복도 막는다
+      // 같은 실행 안에서의 중복도 막는다 — Last.fm은 한 곡을 원제·"원제 - 로마자"·
+      // 로마자 단독으로 각각 등록해 두므로 별칭을 전부 기억해야 한다
+      for (const k of aliases) known.add(k);
 
       const sourceId = track.mbid || `${primaryArtistKey(artist)}:${normalizeKey(title)}`;
       const placement = await placeSong({
