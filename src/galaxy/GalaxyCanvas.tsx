@@ -427,7 +427,21 @@ export default function GalaxyCanvas({
     setFocusedCardId(null); // 목록이 바뀌면 이전 포커스 해제 (필요 시 scrollToCard가 다시 세팅)
   }, [cards]);
 
-  // 카드 패널이 열려 있는 동안은 전역 미니플레이어를 숨긴다 (재생 UI 중복 방지)
+  /**
+   * 카드 목록 열기/닫기.
+   * 미니플레이어 숨김 신호를 같은 커밋에 함께 보내야 알약과 캐러셀이 겹치지 않는다.
+   * (이펙트로 한 박자 뒤에 보내면 느린 기기에서 둘이 몇 초씩 같이 보인다)
+   */
+  const showCards = useCallback(
+    (next: CardData | null) => {
+      setCards(next);
+      setUiHosted(next !== null);
+    },
+    [setUiHosted],
+  );
+
+  // 위 showCards를 놓친 경로가 있어도 상태가 어긋나지 않도록 하는 보정 +
+  // 은하 화면을 떠날 때 알약을 다시 띄우기 위한 정리
   useEffect(() => {
     setUiHosted(cards !== null);
     return () => setUiHosted(false);
@@ -464,8 +478,8 @@ export default function GalaxyCanvas({
     cardsRestored.current = true;
     const { queue: q, playingId: pid } = playingMirror.current;
     if (!q || pid === null) return;
-    setCards(toCards(q));
-  }, [status, toCards]);
+    showCards(toCards(q));
+  }, [status, toCards, showCards]);
 
   /**
    * 행성 착륙 전 은하에서 듣던 곡 — 은하로 나올 때 이 곡을 그 위치부터 이어 듣는다.
@@ -845,7 +859,7 @@ export default function GalaxyCanvas({
         exitSky();
         return;
       }
-      setCards(null);
+      showCards(null);
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
     flyToPosRef.current = (x, y, z, dist) => flyTo(new THREE.Vector3(x, y, z), dist);
@@ -949,7 +963,7 @@ export default function GalaxyCanvas({
             ];
             k = 0;
           }
-          setCards({
+          showCards({
             title: sub.label,
             subtitle: `${parent.label} · ${songs.length}곡`,
             color: sub.color,
@@ -1259,7 +1273,7 @@ export default function GalaxyCanvas({
       controls.maxPolarAngle = Math.PI - 0.02;
 
       // 하단 카드: ○○의 밤하늘 (최근 좋아요 순서 유지)
-      setCards({
+      showCards({
         title: `✦ ${entry.data.nickname}의 밤하늘`,
         subtitle: `좋아요 ${n}곡`,
         color: "#ffdf9e",
@@ -1293,7 +1307,7 @@ export default function GalaxyCanvas({
       // 은하에서 듣던 곡을 기억 — 착륙하면 행성 라디오로 바뀌고, 나올 때 여기서 이어 듣는다
       galaxySnapshot.current = playerApiRef.current.snapshot();
       pendingSky = { entry, songIds: null };
-      setCards(null);
+      showCards(null);
       setSkyInfo({ userId: entry.data.userId, nickname: entry.data.nickname });
       // 좋아요 목록·행성 정보는 비행하는 동안 미리 로드
       fetch(`/api/users/${entry.data.userId}/likes`)
@@ -1403,10 +1417,10 @@ export default function GalaxyCanvas({
       galaxySnapshot.current = null;
       if (snap) {
         void playerApiRef.current.restore(snap);
-        setCards(snap.queue ? toCardsRef.current(snap.queue) : null);
+        showCards(snap.queue ? toCardsRef.current(snap.queue) : null);
       } else {
         playerApiRef.current.stop();
-        setCards(null);
+        showCards(null);
       }
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
@@ -1450,7 +1464,7 @@ export default function GalaxyCanvas({
         payload.themes.filter((t) => t.parentId === cluster.id).map((t) => t.id),
       );
       const songs = collectSongs((id) => childIds.has(id));
-      setCards({
+      showCards({
         title: cluster.label,
         subtitle: `성단 전체 인기곡 · ${songs.length}곡`,
         color: cluster.color,
@@ -1464,7 +1478,7 @@ export default function GalaxyCanvas({
       if (!payload) return;
       flyTo(new THREE.Vector3(theme.x, theme.y, theme.z), theme.radius * 2.4);
       const songs = collectSongs((id) => id === theme.id);
-      setCards({
+      showCards({
         title: theme.label,
         subtitle: `${parent.label} · ${songs.length}곡`,
         color: theme.color,
@@ -2418,7 +2432,7 @@ export default function GalaxyCanvas({
               </button>
               <button
                 type="button"
-                onClick={() => setCards(null)}
+                onClick={() => showCards(null)}
                 className="rounded-full px-2 text-white/60 transition hover:text-white"
                 aria-label="곡 목록 닫기"
               >
