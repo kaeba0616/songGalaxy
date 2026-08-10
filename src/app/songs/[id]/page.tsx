@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getSessionUser } from "@/auth";
+import DataCredits from "@/components/DataCredits";
 import LikeButton from "@/components/LikeButton";
 import { enrichSongs } from "@/server/enrich";
 import { getArtistInfo } from "@/server/artist-info";
@@ -164,14 +165,12 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
           )}
           {lyrics.plain && (
             <p className="mt-1.5 text-xs text-white/30">
-              가사 출처:{" "}
-              <a href="https://lrclib.net" target="_blank" rel="noreferrer" className="underline">
-                LRCLIB
-              </a>{" "}
-              (커뮤니티 기여 데이터)
+              커뮤니티 기여 데이터입니다 — 출처는 아래 참조
             </p>
           )}
         </section>
+
+        <DataCredits />
       </div>
     </main>
   );

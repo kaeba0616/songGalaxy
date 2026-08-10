@@ -2,6 +2,7 @@ import Link from "next/link";
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
+import DataCredits from "@/components/DataCredits";
 import { searchExternal } from "@/server/import-song";
 import { importSongAction } from "./actions";
 import ImportButton from "./ImportButton";
@@ -276,6 +277,8 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
             )}
           </div>
         )}
+
+        <DataCredits />
       </div>
     </main>
   );

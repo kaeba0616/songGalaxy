@@ -6,6 +6,7 @@ import { getSessionUser } from "@/auth";
 import { MIN_LIKES_FOR_STAR } from "@/config/constants";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
 import { DEFAULT_PLANET_THEME, PLANET_THEMES } from "@/config/planet-themes";
+import DataCredits from "@/components/DataCredits";
 import LikeButton from "@/components/LikeButton";
 import { setPlanetThemeAction } from "./actions";
 
@@ -193,6 +194,8 @@ export default async function MePage() {
             )}
           </ul>
         </section>
+
+        <DataCredits />
       </div>
     </main>
   );

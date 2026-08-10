@@ -14,6 +14,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { BIO_MAX, ENRICH_BATCH, MIN_LIKES_FOR_STAR, NICKNAME_MAX } from "@/config/constants";
 import { getPlanetTheme } from "@/config/planet-themes";
+import DataCredits from "@/components/DataCredits";
 import { hashString, mulberry32 } from "@/lib/layout-math";
 import { useLikes } from "@/likes/likes-context";
 import { usePlayer } from "@/player/player-context";
@@ -1979,6 +1980,11 @@ export default function GalaxyCanvas({
             <p className="mt-1 text-xs text-amber-200/90">
               ✦ 별까지 {MIN_LIKES_FOR_STAR - authState.likesCount}곡 — 좋아하는 곡에 ♥를 눌러보세요
             </p>
+          )}
+          {status === "ready" && (
+            <div className="mt-2">
+              <DataCredits compact />
+            </div>
           )}
         </div>
       )}
