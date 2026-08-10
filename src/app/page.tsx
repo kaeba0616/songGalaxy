@@ -16,18 +16,14 @@ export default async function Home(props: {
 }) {
   const { song, star } = await props.searchParams;
   const songId = Number(song);
+  // 은하 데이터 요청은 GalaxyCanvas가 이펙트 맨 앞에서 직접 보낸다.
+  // 여기에 <link rel="preload" as="fetch">를 두는 방법을 시도했다가 되돌렸다 —
+  // preload가 fetch()의 CORS 모드와 맞지 않아 재사용되지 않고,
+  // 3MB짜리 페이로드를 두 번 받아버렸다 (실측: galaxy 요청 2건).
   return (
-    <>
-      {/*
-        은하 데이터를 HTML 파싱 단계에서 미리 받기 시작한다.
-        이게 없으면 JS 번들 로드·하이드레이션이 끝난 뒤에야 요청이 나가서
-        첫 화면이 1초 넘게 늦어진다 (실측: 요청 시작이 1.65초 지점).
-      */}
-      <link rel="preload" href="/api/galaxy" as="fetch" />
-      <GalaxyCanvas
-        initialSongId={Number.isInteger(songId) ? songId : undefined}
-        focusMyStar={star === "me"}
-      />
-    </>
+    <GalaxyCanvas
+      initialSongId={Number.isInteger(songId) ? songId : undefined}
+      focusMyStar={star === "me"}
+    />
   );
 }
