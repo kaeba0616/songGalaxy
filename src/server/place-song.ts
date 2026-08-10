@@ -154,17 +154,32 @@ async function placeByFeatures(
   };
 }
 
-/** 특징을 못 찾았을 때 — 같은 가수의 기존 곡 근처 (같은 가수 곡은 대체로 소리가 비슷하다) */
+/**
+ * 특징을 못 찾았을 때 — 같은 가수의 기존 곡 근처 (같은 가수 곡은 대체로 소리가 비슷하다).
+ *
+ * 같은 장르의 곡만 먼저 본다. 한 가수의 곡이 여러 장르에 흩어져 있으면
+ * 전체 평균이 그 사이 빈 공간에 떨어져, 정작 어느 곡과도 가깝지 않게 된다
+ * (Bethel Music: ambient 53곡 + world-music 25곡 → 중심이 두 무리 사이).
+ */
 async function placeByArtist(
   subTheme: Theme,
+  genre: string,
   artist: string,
   rng: () => number,
 ): Promise<{ x: number; y: number; z: number } | null> {
-  const rows = await db
-    .select({ x: schema.songs.posX, y: schema.songs.posY, z: schema.songs.posZ })
+  const sameArtist = and(
+    sql`lower(${schema.songs.artist}) = lower(${artist})`,
+    isNotNull(schema.songs.posX),
+  );
+  const cols = { x: schema.songs.posX, y: schema.songs.posY, z: schema.songs.posZ };
+  let rows = await db
+    .select(cols)
     .from(schema.songs)
-    .where(and(sql`lower(${schema.songs.artist}) = lower(${artist})`, isNotNull(schema.songs.posX)))
+    .where(and(sameArtist, eq(schema.songs.genre, genre)))
     .limit(20);
+  if (rows.length === 0) {
+    rows = await db.select(cols).from(schema.songs).where(sameArtist).limit(20);
+  }
   if (rows.length === 0) return null;
   const n = rows.length;
   const jitter = (subTheme.radius ?? 40) * 0.15;
@@ -220,7 +235,7 @@ export async function placeSong(args: {
     if (point) method = "features";
   }
   if (!point) {
-    point = await placeByArtist(subTheme, artist, rng);
+    point = await placeByArtist(subTheme, genre, artist, rng);
     if (point) method = "artist";
   }
   if (!point) point = placeRandom(subTheme, rng);
