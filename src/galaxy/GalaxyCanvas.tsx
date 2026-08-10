@@ -622,8 +622,11 @@ export default function GalaxyCanvas({
     let disposed = false;
     let frameId = 0;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // 터치 기기는 필레이트가 약해 해상도·MSAA·글로우층을 줄인다 (모바일 렉 대책)
+    const isCoarse = window.matchMedia("(pointer: coarse)").matches;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: !isCoarse });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, isCoarse ? 1.5 : 2));
     renderer.setClearColor(GALAXY_BG);
     container.appendChild(renderer.domElement);
 
@@ -1474,6 +1477,18 @@ export default function GalaxyCanvas({
         skipLanding();
         return;
       }
+      // 터치 기기: 라벨의 pointer-events가 꺼져 있으므로 탭 좌표로 라벨 클릭을 직접 판정
+      // (세부 장르 라벨이 성단 라벨 위에 겹치므로 lv2 먼저)
+      if (isCoarse && !skyActive) {
+        for (const l of [...subLabels, ...clusterLabels]) {
+          if (parseFloat(l.el.style.opacity || "0") < 0.35) continue;
+          const r = l.el.getBoundingClientRect();
+          if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+            l.el.click();
+            return;
+          }
+        }
+      }
       const rect = renderer.domElement.getBoundingClientRect();
       const ndc = new THREE.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -1602,9 +1617,13 @@ export default function GalaxyCanvas({
           haloSizes[i] = sizes[i] * 4.5;
         }
         points = makePointsLayer(positions, colors, sizes, 0.95);
-        const halo = makePointsLayer(positions, colors, haloSizes, 0.06); // 성운 느낌의 글로우층
-        haloMat = halo.material as THREE.ShaderMaterial;
-        scene.add(halo, points);
+        if (isCoarse) {
+          scene.add(points); // 모바일: 글로우층은 오버드로우가 커서 생략
+        } else {
+          const halo = makePointsLayer(positions, colors, haloSizes, 0.06); // 성운 느낌의 글로우층
+          haloMat = halo.material as THREE.ShaderMaterial;
+          scene.add(halo, points);
+        }
         minimapClusters = data.themes.filter((t) => t.level === 1);
         // 은하 주민들 — 캐시 없는 별도 엔드포인트에서 항상 최신으로
         fetch("/api/stars")
@@ -1655,6 +1674,11 @@ export default function GalaxyCanvas({
         if (!disposed) setStatus("error");
       });
 
+    // 곡 라벨 최근접 스캔용 재사용 버퍼 — 매번 수만 개 객체를 할당하면 GC 스파이크로 드래그가 끊긴다
+    const songLabelScanEvery = isCoarse ? 24 : 12;
+    const nearD = new Float64Array(SONG_LABEL_POOL);
+    const nearI = new Int32Array(SONG_LABEL_POOL);
+
     // 라벨 화면 투영
     const proj = new THREE.Vector3();
     const placeLabel = (el: HTMLDivElement, pos: THREE.Vector3, opacity: number) => {
@@ -1666,7 +1690,9 @@ export default function GalaxyCanvas({
         return;
       }
       el.style.opacity = String(Math.min(1, opacity));
-      el.style.pointerEvents = el.classList.contains("clickable") ? "auto" : "none";
+      // 터치 기기에서는 라벨이 드래그(회전) 시작을 가로채지 않게 항상 통과시키고,
+      // 탭 판정은 onPointerUp에서 좌표로 직접 한다
+      el.style.pointerEvents = !isCoarse && el.classList.contains("clickable") ? "auto" : "none";
       el.style.transform = `translate(-50%, -50%) translate(${((proj.x + 1) / 2) * 100}cqw, ${((1 - proj.y) / 2) * 100}cqh)`;
     };
 
@@ -1704,29 +1730,43 @@ export default function GalaxyCanvas({
           placeLabel(l.el, l.pos, 0.9);
         }
       }
-      // 곡 제목 라벨 (매 12프레임, 가장 가까운 곡) — 밤하늘 모드에서는 하이라이트 라벨이 대신함
-      if (frame % 12 === 0 && positions && payload && !skyActive) {
-        const nearest: { d: number; i: number }[] = [];
+      // 곡 제목 라벨 (주기 스캔, 가장 가까운 곡) — 밤하늘 모드에서는 하이라이트 라벨이 대신함
+      if (frame % songLabelScanEvery === 0 && positions && payload && !skyActive) {
         const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
         const maxD2 = SONG_LABEL_DISTANCE * SONG_LABEL_DISTANCE;
+        let nearCount = 0;
         for (let i = 0; i < payload.songs.id.length; i++) {
           const dx = positions[i * 3] - cx, dy = positions[i * 3 + 1] - cy, dz = positions[i * 3 + 2] - cz;
           const d2 = dx * dx + dy * dy + dz * dz;
-          if (d2 < maxD2) nearest.push({ d: d2, i });
+          if (d2 >= maxD2) continue;
+          if (nearCount === SONG_LABEL_POOL && d2 >= nearD[nearCount - 1]) continue;
+          let j = Math.min(nearCount, SONG_LABEL_POOL - 1);
+          while (j > 0 && nearD[j - 1] > d2) {
+            nearD[j] = nearD[j - 1];
+            nearI[j] = nearI[j - 1];
+            j--;
+          }
+          nearD[j] = d2;
+          nearI[j] = i;
+          if (nearCount < SONG_LABEL_POOL) nearCount++;
         }
-        nearest.sort((a, b) => a.d - b.d);
         // 포커스 곡은 밀집 지역에서 24위 밖으로 밀려나도 항상 라벨을 가진다
-        if (
-          focusedSongIndex >= 0 &&
-          !nearest.slice(0, songLabels.length).some((x) => x.i === focusedSongIndex)
-        ) {
-          nearest.unshift({ d: 0, i: focusedSongIndex });
+        if (focusedSongIndex >= 0) {
+          let hasFocus = false;
+          for (let k = 0; k < nearCount; k++) {
+            if (nearI[k] === focusedSongIndex) { hasFocus = true; break; }
+          }
+          if (!hasFocus) {
+            const k = Math.min(nearCount, SONG_LABEL_POOL - 1);
+            nearI[k] = focusedSongIndex;
+            if (nearCount < SONG_LABEL_POOL) nearCount++;
+          }
         }
         for (let k = 0; k < songLabels.length; k++) {
           const slot = songLabels[k];
-          const pick = nearest[k];
-          slot.index = pick ? pick.i : -1;
-          if (pick) slot.el.textContent = payload.songs.title[pick.i];
+          const has = k < nearCount;
+          slot.index = has ? nearI[k] : -1;
+          if (has) slot.el.textContent = payload.songs.title[nearI[k]];
         }
       }
       if (positions) {
