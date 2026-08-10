@@ -859,7 +859,9 @@ export default function GalaxyCanvas({
         exitSky();
         return;
       }
-      showCards(null);
+      // 재생 중이면 목록을 유지한 채 카메라만 되돌린다.
+      // (닫아버리면 은하에서 알약이 튀어나와 "은하에서는 캐러셀" 규칙이 깨진다)
+      if (playingMirror.current.playingId === null) showCards(null);
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
     flyToPosRef.current = (x, y, z, dist) => flyTo(new THREE.Vector3(x, y, z), dist);
