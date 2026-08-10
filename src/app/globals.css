@@ -106,6 +106,27 @@ body {
   background-color: rgba(255, 255, 255, 0.32);
 }
 
+/* 미니플레이어의 긴 곡 제목·가수명 흐르기 (Marquee.tsx)
+   같은 글자 두 벌 중 정확히 절반을 밀어 끊김 없이 반복한다 */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.animate-marquee {
+  animation-name: marquee;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee {
+    animation: none;
+  }
+}
+
 /* 카드 캐러셀 스크롤바 숨김 */
 .scrollbar-none {
   scrollbar-width: none;

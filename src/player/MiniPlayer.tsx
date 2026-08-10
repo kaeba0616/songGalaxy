@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ENRICH_BATCH } from "@/config/constants";
 import { useLikes } from "@/likes/likes-context";
+import Marquee from "./Marquee";
 import { usePlayer } from "./player-context";
 
 /** 드래그로 옮긴 미니플레이어 위치 (뷰포트 좌상단 기준 px) */
@@ -255,9 +256,12 @@ export default function MiniPlayer() {
             ✦
           </div>
         )}
-        <div className="min-w-0 max-w-32 sm:max-w-48">
-          <p className="truncate text-sm font-medium">{song.title}</p>
-          <p className="truncate text-xs text-white/50">{song.artist}</p>
+        {/* 폭 고정 — 곡 제목 길이에 따라 알약 크기가 변하지 않게 한다.
+            넘치는 글자는 Marquee가 흐르게 처리 */}
+        {/* min-w-0: 없으면 긴 제목의 min-content 폭 때문에 알약이 화면 밖까지 밀린다 */}
+        <div className="w-28 min-w-0 shrink sm:w-44">
+          <Marquee text={song.title} className="text-sm font-medium" />
+          <Marquee text={song.artist} className="text-xs text-white/50" />
         </div>
         {/* 컨트롤 — 손가락으로 눌리도록 버튼마다 32px 정사각 터치 영역을 준다 */}
         <div className="flex shrink-0 items-center gap-0.5">
