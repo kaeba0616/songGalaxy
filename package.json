@@ -10,6 +10,7 @@
     "db:up": "docker compose up -d",
     "db:push": "drizzle-kit push",
     "ingest": "tsx --env-file=.env scripts/ingest-dataset.ts",
+    "ingest:features": "tsx --env-file=.env scripts/ingest-features.ts",
     "ingest:new": "tsx --env-file=.env scripts/ingest-new-releases.ts"
   },
   "dependencies": {

@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { itunesGenreToGenre } from "@/config/genre-clusters";
-import { placeInGenre } from "./place-song";
+import { placeSong } from "./place-song";
 
 /** 검색 즉석 편입 배치 식별자 — 롤백 시 이 값으로 삭제 (docs/SSOT.md) */
 const USER_IMPORT_BATCH = "user-import";
@@ -102,11 +102,16 @@ export async function importFromItunes(itunesId: number): Promise<number | null>
   if (!track?.trackId || !track.trackName || !track.artistName) return null;
 
   const genre = itunesGenreToGenre(track.primaryGenreName ?? "");
+  const placeArgs = {
+    seedKey: `${SOURCE}:${sourceId}`,
+    title: track.trackName,
+    artist: track.artistName,
+  };
   const placement =
-    (await placeInGenre(genre, `${SOURCE}:${sourceId}`)) ??
-    (await placeInGenre("pop", `${SOURCE}:${sourceId}`));
+    (await placeSong({ genre, ...placeArgs })) ??
+    (await placeSong({ genre: "pop", ...placeArgs }));
   if (!placement) return null;
-  const { themeId, x, y, z } = placement;
+  const { themeId, x, y, z, features } = placement;
 
   const [inserted] = await db
     .insert(schema.songs)
@@ -122,7 +127,7 @@ export async function importFromItunes(itunesId: number): Promise<number | null>
       posX: x,
       posY: y,
       posZ: z,
-      features: null, // 오디오 특징 없음 — 태그 기반 배치
+      features, // 조회표에서 찾았으면 저장 (다음 배치·재배치에서 재사용)
       popularity: 50, // iTunes에는 인기도가 없어 중간값으로 시작
       explicit: track.trackExplicitness === "explicit",
       durationMs: track.trackTimeMillis ?? null,

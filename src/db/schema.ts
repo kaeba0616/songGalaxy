@@ -4,6 +4,7 @@
  */
 import {
   boolean,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -69,6 +70,32 @@ export const songs = pgTable(
     youtubeCheckedAt: timestamp("youtube_checked_at"),
   },
   (table) => [uniqueIndex("songs_source_unique").on(table.source, table.sourceId)],
+);
+
+/**
+ * 오디오 특징 조회표 — 원본은 초기 데이터셋 CSV (docs/SSOT.md).
+ *
+ * 은하에 넣지 않은 곡(인기도 하위 5.9만 곡)의 특징까지 들고 있다.
+ * 나중에 편입되는 곡의 특징을 여기서 찾아, 소리가 비슷한 곡 옆에 놓기 위함.
+ * songs와 달리 "곡 데이터"가 아니라 배치용 참조표라서 별도 테이블로 둔다.
+ */
+export const datasetFeatures = pgTable(
+  "dataset_features",
+  {
+    id: serial("id").primaryKey(),
+    /** 정규화된 제목 (소문자 + 문자/숫자만) */
+    titleKey: text("title_key").notNull(),
+    /** 괄호·부제를 뗀 제목 — "Song (feat. X)" 같은 표기 차이를 흡수 */
+    baseKey: text("base_key").notNull(),
+    /** 정규화된 대표(첫 번째) 가수명 */
+    artistKey: text("artist_key").notNull(),
+    genre: text("genre").notNull(),
+    features: jsonb("features").$type<Record<string, number>>().notNull(),
+  },
+  (table) => [
+    index("dataset_features_title_artist").on(table.titleKey, table.artistKey),
+    index("dataset_features_base_artist").on(table.baseKey, table.artistKey),
+  ],
 );
 
 /** 가수 정보 캐시 — 원본은 MusicBrainz API (CC0). name 기준 1회 조회 후 재사용 */

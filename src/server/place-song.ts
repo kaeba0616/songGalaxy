@@ -1,37 +1,28 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { GALAXY_RADIUS } from "@/config/constants";
+import { AUDIO_FEATURE_KEYS, GALAXY_RADIUS, PLACEMENT_NEIGHBORS } from "@/config/constants";
 import { hashString, mulberry32 } from "@/lib/layout-math";
+import { baseTitleKey, normalizeKey, primaryArtistKey } from "@/lib/match-key";
 
 export interface Placement {
   themeId: number;
   x: number;
   y: number;
   z: number;
+  /** 찾아낸 오디오 특징 (곡 행에 함께 저장해 두면 다음에 다시 조회할 필요가 없다) */
+  features: Record<string, number> | null;
+  /** 어떤 방법으로 자리를 잡았는지 — 로그·검증용 */
+  method: "features" | "artist" | "genre";
 }
 
-/**
- * 오디오 특징이 없는 신규 곡의 좌표 산출 — 태그 기반 배치 (docs/SSOT.md).
- * 장르(세부 테마) 구역 안에 시드 랜덤(재현 가능) 좌표를 만들고,
- * 성단·은하 경계를 넘지 않게 클램프한다. 기존 별 좌표는 건드리지 않는다.
- * 즉석 편입(import-song)과 주간 신곡 파이프라인이 공용으로 사용한다.
- */
-export async function placeInGenre(genre: string, seedKey: string): Promise<Placement | null> {
-  const [subTheme] = await db
-    .select()
-    .from(schema.themes)
-    .where(and(eq(schema.themes.level, 2), eq(schema.themes.name, genre)));
-  if (!subTheme) return null;
+type Theme = typeof schema.themes.$inferSelect;
 
-  const rng = mulberry32(hashString(seedKey));
-  const theta = rng() * Math.PI * 2;
-  const phi = Math.acos(2 * rng() - 1);
-  const r = (subTheme.radius ?? 40) * 0.85 * Math.cbrt(rng());
-  let x = (subTheme.posX ?? 0) + r * Math.sin(phi) * Math.cos(theta);
-  let y = (subTheme.posY ?? 0) + r * Math.sin(phi) * Math.sin(theta);
-  let z = (subTheme.posZ ?? 0) + r * Math.cos(phi);
-
-  // 성단(부모) 경계 클램프
+/** 성단·은하 경계 밖으로 나가지 않게 안쪽으로 당긴다 */
+async function clampToBounds(
+  subTheme: Theme,
+  p: { x: number; y: number; z: number },
+): Promise<{ x: number; y: number; z: number }> {
+  let { x, y, z } = p;
   if (subTheme.parentId != null) {
     const [big] = await db
       .select()
@@ -51,11 +42,189 @@ export async function placeInGenre(genre: string, seedKey: string): Promise<Plac
       }
     }
   }
-  // 은하 전체 반지름 클램프
   const dist = Math.hypot(x, y, z);
   if (dist > GALAXY_RADIUS) {
     const s = GALAXY_RADIUS / dist;
-    x *= s; y *= s; z *= s;
+    x *= s;
+    y *= s;
+    z *= s;
   }
-  return { themeId: subTheme.id, x, y, z };
+  return { x, y, z };
+}
+
+/**
+ * 데이터셋 조회표에서 오디오 특징을 찾는다.
+ * 제목+가수 → 부제 뗀 제목+가수 순으로 시도한다 (스토어마다 표기가 다르다).
+ */
+async function lookupFeatures(
+  title: string,
+  artist: string,
+): Promise<Record<string, number> | null> {
+  const titleKey = normalizeKey(title);
+  const baseKey = baseTitleKey(title);
+  const artistKey = primaryArtistKey(artist);
+  if (!artistKey || (!titleKey && !baseKey)) return null;
+
+  const [hit] = await db
+    .select({ features: schema.datasetFeatures.features })
+    .from(schema.datasetFeatures)
+    .where(
+      and(
+        eq(schema.datasetFeatures.artistKey, artistKey),
+        or(
+          eq(schema.datasetFeatures.titleKey, titleKey),
+          eq(schema.datasetFeatures.baseKey, baseKey),
+        ),
+      ),
+    )
+    .limit(1);
+  return hit?.features ?? null;
+}
+
+/**
+ * 같은 장르에서 특징이 가장 가까운 곡들의 좌표 중심에 놓는다.
+ *
+ * 배치 스크립트가 쓴 PCA 축은 저장돼 있지 않지만, 기존 곡들이 특징과 좌표를
+ * 둘 다 갖고 있으므로 "가까운 이웃의 자리"를 빌리면 같은 성질을 얻을 수 있다.
+ * 특징 스케일이 제각각(tempo는 세 자리, valence는 0~1)이라 z-score로 맞춘 뒤 비교한다.
+ */
+async function placeByFeatures(
+  subTheme: Theme,
+  genre: string,
+  features: Record<string, number>,
+  rng: () => number,
+): Promise<{ x: number; y: number; z: number } | null> {
+  const neighbours = await db
+    .select({
+      x: schema.songs.posX,
+      y: schema.songs.posY,
+      z: schema.songs.posZ,
+      features: schema.songs.features,
+    })
+    .from(schema.songs)
+    .where(
+      and(
+        eq(schema.songs.genre, genre),
+        isNotNull(schema.songs.posX),
+        isNotNull(schema.songs.features),
+      ),
+    );
+  const pool = neighbours.filter((n) => n.features && n.x != null);
+  if (pool.length < PLACEMENT_NEIGHBORS) return null;
+
+  // 이 장르 안에서의 평균·표준편차로 정규화 (배치 스크립트와 같은 z-score 방식)
+  const mean: number[] = [];
+  const std: number[] = [];
+  AUDIO_FEATURE_KEYS.forEach((key, j) => {
+    const vals = pool.map((n) => Number(n.features?.[key] ?? 0));
+    const m = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const v = vals.reduce((a, b) => a + (b - m) ** 2, 0) / vals.length;
+    mean[j] = m;
+    std[j] = Math.sqrt(v) || 1;
+  });
+  const z = (f: Record<string, number> | null) =>
+    AUDIO_FEATURE_KEYS.map((key, j) => (Number(f?.[key] ?? 0) - mean[j]) / std[j]);
+
+  const target = z(features);
+  const scored = pool
+    .map((n) => {
+      const v = z(n.features);
+      let d2 = 0;
+      for (let j = 0; j < target.length; j++) d2 += (v[j] - target[j]) ** 2;
+      return { n, d: Math.sqrt(d2) };
+    })
+    .sort((a, b) => a.d - b.d)
+    .slice(0, PLACEMENT_NEIGHBORS);
+
+  // 가까운 이웃일수록 크게 반영
+  let sx = 0, sy = 0, sz = 0, sw = 0;
+  for (const { n, d } of scored) {
+    const w = 1 / (d + 0.1);
+    sx += n.x! * w;
+    sy += n.y! * w;
+    sz += n.z! * w;
+    sw += w;
+  }
+  // 이웃과 완전히 겹치지 않게 아주 작은 흔들림만 더한다
+  const jitter = (subTheme.radius ?? 40) * 0.05;
+  return {
+    x: sx / sw + (rng() * 2 - 1) * jitter,
+    y: sy / sw + (rng() * 2 - 1) * jitter,
+    z: sz / sw + (rng() * 2 - 1) * jitter,
+  };
+}
+
+/** 특징을 못 찾았을 때 — 같은 가수의 기존 곡 근처 (같은 가수 곡은 대체로 소리가 비슷하다) */
+async function placeByArtist(
+  subTheme: Theme,
+  artist: string,
+  rng: () => number,
+): Promise<{ x: number; y: number; z: number } | null> {
+  const rows = await db
+    .select({ x: schema.songs.posX, y: schema.songs.posY, z: schema.songs.posZ })
+    .from(schema.songs)
+    .where(and(sql`lower(${schema.songs.artist}) = lower(${artist})`, isNotNull(schema.songs.posX)))
+    .limit(20);
+  if (rows.length === 0) return null;
+  const n = rows.length;
+  const jitter = (subTheme.radius ?? 40) * 0.15;
+  return {
+    x: rows.reduce((s, r) => s + r.x!, 0) / n + (rng() * 2 - 1) * jitter,
+    y: rows.reduce((s, r) => s + r.y!, 0) / n + (rng() * 2 - 1) * jitter,
+    z: rows.reduce((s, r) => s + r.z!, 0) / n + (rng() * 2 - 1) * jitter,
+  };
+}
+
+/** 마지막 수단 — 장르 구역 안 시드 랜덤 (기존 동작) */
+function placeRandom(subTheme: Theme, rng: () => number): { x: number; y: number; z: number } {
+  const theta = rng() * Math.PI * 2;
+  const phi = Math.acos(2 * rng() - 1);
+  const r = (subTheme.radius ?? 40) * 0.85 * Math.cbrt(rng());
+  return {
+    x: (subTheme.posX ?? 0) + r * Math.sin(phi) * Math.cos(theta),
+    y: (subTheme.posY ?? 0) + r * Math.sin(phi) * Math.sin(theta),
+    z: (subTheme.posZ ?? 0) + r * Math.cos(phi),
+  };
+}
+
+/**
+ * 신규 곡의 좌표 산출 (docs/SSOT.md).
+ *
+ * "비슷한 소리끼리 모인다"는 은하의 규칙을 신규 곡에도 지키기 위해
+ * ① 데이터셋 조회표에서 오디오 특징을 찾아 가까운 이웃 옆에 놓고,
+ * ② 못 찾으면 같은 가수 곡 근처,
+ * ③ 그것도 없으면 장르 구역 안 랜덤 순으로 물러난다.
+ * 기존 곡의 좌표는 어떤 경우에도 건드리지 않는다.
+ */
+export async function placeSong(args: {
+  genre: string;
+  seedKey: string;
+  title: string;
+  artist: string;
+}): Promise<Placement | null> {
+  const { genre, seedKey, title, artist } = args;
+  const [subTheme] = await db
+    .select()
+    .from(schema.themes)
+    .where(and(eq(schema.themes.level, 2), eq(schema.themes.name, genre)));
+  if (!subTheme) return null;
+
+  const rng = mulberry32(hashString(seedKey));
+  const features = await lookupFeatures(title, artist);
+
+  let method: Placement["method"] = "genre";
+  let point: { x: number; y: number; z: number } | null = null;
+
+  if (features) {
+    point = await placeByFeatures(subTheme, genre, features, rng);
+    if (point) method = "features";
+  }
+  if (!point) {
+    point = await placeByArtist(subTheme, artist, rng);
+    if (point) method = "artist";
+  }
+  if (!point) point = placeRandom(subTheme, rng);
+
+  const clamped = await clampToBounds(subTheme, point);
+  return { themeId: subTheme.id, ...clamped, features, method };
 }

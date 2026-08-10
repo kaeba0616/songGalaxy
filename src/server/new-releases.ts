@@ -1,7 +1,7 @@
 import { and, eq, ilike } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { GENRE_TO_CLUSTER } from "@/config/genre-clusters";
-import { placeInGenre } from "./place-song";
+import { placeSong } from "./place-song";
 
 /**
  * 주간 신곡 적재 코어 (이슈 #7·#8) — CLI(scripts/ingest-new-releases.ts)와
@@ -146,7 +146,12 @@ export async function runNewReleaseIngest(opts: IngestOptions = {}): Promise<Ing
         continue;
       }
 
-      const placement = await placeInGenre(genre, `${SOURCE}:${rg.id}`);
+      const placement = await placeSong({
+        genre,
+        seedKey: `${SOURCE}:${rg.id}`,
+        title: rg.title,
+        artist,
+      });
       if (!placement) {
         stats.unmapped++;
         continue;
@@ -168,7 +173,7 @@ export async function runNewReleaseIngest(opts: IngestOptions = {}): Promise<Ing
           posX: placement.x,
           posY: placement.y,
           posZ: placement.z,
-          features: null, // 오디오 특징 없음 — 태그 기반 배치
+          features: placement.features, // 조회표에서 찾았으면 저장
           popularity: 45, // 인기도 정보 없음 — 중간보다 약간 낮게 시작
           batchId,
         })

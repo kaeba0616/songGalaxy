@@ -19,7 +19,10 @@
 | 곡 데이터 원천(기본) | HuggingFace `maharshipandya/spotify-tracks-dataset` → `scripts/ingest-dataset.ts` | `songs` 테이블 (3만 곡, source=`spotify-tracks-114k`) | 멱등: `(source, source_id)` 유니크. 2022-10 스냅샷 |
 | 곡 데이터 원천(즉석 편입) | 외부 iTunes Search API → `src/server/import-song.ts` | `songs` 테이블 (source=`itunes`, batch=`user-import`) | /songs 검색에서 유저 트리거. iTunes 장르 매핑: `genre-clusters.ts`의 `ITUNES_GENRE_TO_GENRE` |
 | 곡 데이터 원천(주간 신곡) | 외부 MusicBrainz API → `src/server/new-releases.ts` | `songs` 테이블 (source=`musicbrainz`, batch=`mb-weekly-<날짜>`) | 최근 7일 공식 싱글 + 장르 태그 필수 + 상한. 롤백=배치 삭제. CLI(`npm run ingest:new`)와 Cron(`/api/cron/ingest-new-releases`, vercel.json, 매주 월 03:00 UTC, CRON_SECRET 보호)이 공용 |
-| 태그 기반 좌표 배치 | `src/server/place-song.ts` | 즉석 편입·주간 신곡이 공용 | 세부 테마 구역 내 시드 랜덤 + 성단/은하 경계 클램프 |
+| 신규 곡 좌표 배치 | `src/server/place-song.ts` (`placeSong`) | 즉석 편입·주간 신곡이 공용 | ① 조회표에서 특징을 찾아 같은 장르 최근접 이웃 8곡의 좌표 중심 → ② 같은 가수 곡 근처 → ③ 장르 구역 랜덤 순으로 폴백. 성단/은하 경계 클램프 |
+| 오디오 특징 조회표 | `dataset_features` 테이블 (`scripts/ingest-features.ts`가 CSV에서 적재) | 신규 곡 배치의 특징 원천 | 데이터셋 고유 8.9만 곡 전체(은하 미적재분 포함). `data/`는 배포되지 않으므로 DB에 둔다. **스키마 변경 시 로컬·Neon 양쪽 적재 필요** |
+| 곡 매칭 키 정규화 | `src/lib/match-key.ts` | 조회표 적재·조회가 공용 | 규칙을 바꾸면 `dataset_features`를 다시 적재해야 함 |
+| 오디오 특징 목록 | `src/config/constants.ts`의 `AUDIO_FEATURE_KEYS` | 적재·배치·이웃 찾기 | 순서까지 동일해야 함 |
 | 좌표 수학 유틸 | `src/lib/layout-math.ts` | 배치 스크립트·즉석 편입이 공용 | scripts/lib에서 이동 |
 | 장르→성단 매핑 | `src/config/genre-clusters.ts` | `themes` 테이블 (`scripts/build-themes.ts`가 생성) | 성단 12개·색상 포함. 매핑 변경은 신규 곡에만 적용 |
 | 행성 테마 팔레트 | `src/config/planet-themes.ts` | `users.planet_theme`(slug 저장), 밤하늘 렌더링 | 꾸미기 맛보기(이슈 #10). 테마 추가는 여기서만 |

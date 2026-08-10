@@ -23,6 +23,25 @@ export const RECENT_LIKE_WINDOW = 10;
 /** 앨범아트·미리듣기 보강 배치 크기 — /api/enrich 요청 상한과 클라이언트 배치가 공유 */
 export const ENRICH_BATCH = 12;
 
+/**
+ * 좌표 산출에 쓰는 오디오 특징 (데이터셋 컬럼명).
+ * 적재·배치·신곡 이웃 찾기가 모두 이 목록을 공유한다 — 순서까지 같아야 한다.
+ */
+export const AUDIO_FEATURE_KEYS = [
+  "danceability",
+  "energy",
+  "loudness",
+  "speechiness",
+  "acousticness",
+  "instrumentalness",
+  "liveness",
+  "valence",
+  "tempo",
+] as const;
+
+/** 신곡을 놓을 때 참고할 이웃 곡 수 (특징 공간 최근접) */
+export const PLACEMENT_NEIGHBORS = 8;
+
 /** 행성 프로필 — 닉네임 최대 길이 */
 export const NICKNAME_MAX = 20;
 /** 행성 프로필 — 한 줄 소개 최대 길이 */
