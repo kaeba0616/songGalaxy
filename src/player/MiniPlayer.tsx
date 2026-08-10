@@ -241,7 +241,7 @@ export default function MiniPlayer() {
       )}
 
       {/* 알약 본체 */}
-      <div className="flex max-w-[92vw] items-center gap-3 rounded-full border border-white/15 bg-black/80 py-1.5 pl-1.5 pr-3 shadow-xl backdrop-blur">
+      <div className="flex max-w-[92vw] items-center gap-2.5 rounded-full border border-white/15 bg-black/80 py-2 pl-2 pr-2.5 shadow-xl backdrop-blur">
         {m?.artworkUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지, 최적화 프록시 불필요
           <img
@@ -259,11 +259,12 @@ export default function MiniPlayer() {
           <p className="truncate text-sm font-medium">{song.title}</p>
           <p className="truncate text-xs text-white/50">{song.artist}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        {/* 컨트롤 — 손가락으로 눌리도록 버튼마다 32px 정사각 터치 영역을 준다 */}
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
             onClick={() => void toggleLike(playingId)}
-            className={`grid h-7 w-7 cursor-pointer place-items-center rounded-full border text-xs transition ${
+            className={`grid h-8 w-8 cursor-pointer place-items-center rounded-full border text-xs transition ${
               auth.likedIds.has(playingId)
                 ? "border-pink-400/60 bg-pink-500/25 text-pink-200"
                 : "border-white/20 bg-white/10 text-white/70 hover:bg-white/20"
@@ -276,7 +277,7 @@ export default function MiniPlayer() {
           <button
             type="button"
             onClick={() => void playStep(-1)}
-            className="cursor-pointer text-sm text-white/70 transition hover:text-white"
+            className="grid h-8 w-8 cursor-pointer place-items-center rounded-full text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
             aria-label="이전 곡"
             title="이전 곡"
           >
@@ -285,7 +286,7 @@ export default function MiniPlayer() {
           <button
             type="button"
             onClick={toggle}
-            className="cursor-pointer text-sm text-white/70 transition hover:text-white"
+            className="grid h-8 w-8 cursor-pointer place-items-center rounded-full text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
             aria-label={isPaused ? "재생" : "일시정지"}
             title={isPaused ? "재생" : "일시정지"}
           >
@@ -294,7 +295,7 @@ export default function MiniPlayer() {
           <button
             type="button"
             onClick={() => void playStep(1)}
-            className="cursor-pointer text-sm text-white/70 transition hover:text-white"
+            className="grid h-8 w-8 cursor-pointer place-items-center rounded-full text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
             aria-label="다음 곡"
             title="다음 곡"
           >
@@ -304,7 +305,7 @@ export default function MiniPlayer() {
           <button
             type="button"
             onClick={toggleMute}
-            className="cursor-pointer text-sm text-white/70 transition hover:text-white"
+            className="grid h-8 w-8 cursor-pointer place-items-center rounded-full text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
             aria-label={volume > 0 ? "음소거" : "음소거 해제"}
             title={volume > 0 ? "음소거" : "음소거 해제"}
           >
@@ -324,7 +325,7 @@ export default function MiniPlayer() {
             type="button"
             onClick={toggleExpanded}
             aria-expanded={expanded}
-            className="cursor-pointer rounded-full px-1 text-sm text-white/70 transition hover:text-white"
+            className="grid h-8 w-8 cursor-pointer place-items-center rounded-full text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
             aria-label={expanded ? "재생 목록 닫기" : "재생 목록 보기"}
             title={expanded ? "재생 목록 닫기" : "재생 목록 보기"}
           >
