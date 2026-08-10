@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* 은하 배경색 — 모든 페이지가 이 색 위에 그려진다 */
+  --background: #05060f;
+  --foreground: #ededed;
+  /* 네이티브 스크롤바·폼 컨트롤을 어두운 쪽으로 그리게 한다 */
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -10,13 +13,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
@@ -86,6 +82,28 @@ body {
   .galaxy-label-text {
     transition: none;
   }
+}
+
+/* 스크롤바 — 어두운 배경에 묻히게. 트랙은 투명, 손잡이만 옅은 흰빛 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.18);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.32);
 }
 
 /* 카드 캐러셀 스크롤바 숨김 */
