@@ -69,8 +69,6 @@ export default function MiniPlayer() {
   const [expanded, setExpanded] = useState(false);
   /** 목록을 위로 펼칠지 아래로 펼칠지 — 화면에서 바가 놓인 높이로 결정 */
   const [openUp, setOpenUp] = useState(true);
-  /** 오른쪽 끝에 붙어 있으면 목록도 오른쪽 정렬 — 화면 밖으로 삐져나가지 않게 */
-  const [alignRight, setAlignRight] = useState(false);
   /** 포인터와 바 좌상단의 간격 — 드래그 중 바가 튀지 않게 */
   const grabOffset = useRef<Pos>({ x: 0, y: 0 });
 
@@ -107,14 +105,10 @@ export default function MiniPlayer() {
     listRef.current?.querySelector('[data-current="true"]')?.scrollIntoView({ block: "center" });
   }, [expanded]);
 
-  // 목록을 열 때 위아래·좌우 중 공간이 있는 쪽으로 펼친다
+  // 목록을 열 때 위아래 중 공간이 있는 쪽으로 펼친다 (좌우는 알약과 같은 폭이라 그대로)
   const toggleExpanded = () => {
     const r = wrapRef.current?.getBoundingClientRect();
-    if (r) {
-      setOpenUp(r.top > window.innerHeight / 2);
-      const panelWidth = Math.min(360, window.innerWidth * 0.85);
-      setAlignRight(r.left + panelWidth > window.innerWidth - EDGE);
-    }
+    if (r) setOpenUp(r.top > window.innerHeight / 2);
     setExpanded((v) => !v);
   };
 
@@ -171,13 +165,14 @@ export default function MiniPlayer() {
         dragging ? "cursor-grabbing" : "cursor-grab"
       }`}
     >
-      {/* 재생 목록 — 바를 밀어내지 않도록 absolute로 위/아래에 띄운다 */}
+      {/* 재생 목록 — 바를 밀어내지 않도록 absolute로 위/아래에 띄운다.
+          w-full = 바깥 래퍼(w-fit) 폭 = 알약 폭이라 둘의 너비가 항상 같다 */}
       {expanded && (
         <div
           data-playlist
-          className={`absolute w-[min(360px,85vw)] overflow-hidden rounded-2xl border border-white/15 bg-black/90 text-white shadow-2xl backdrop-blur ${
+          className={`absolute left-0 w-full overflow-hidden rounded-2xl border border-white/15 bg-black/90 text-white shadow-2xl backdrop-blur ${
             openUp ? "bottom-full mb-2" : "top-full mt-2"
-          } ${alignRight ? "right-0" : "left-0"}`}
+          }`}
         >
           <div className="border-b border-white/10 px-4 py-2.5">
             <p className="text-[11px] tracking-widest text-white/40">재생 목록</p>
@@ -226,12 +221,11 @@ export default function MiniPlayer() {
                       </span>
                     )}
                     <span className="min-w-0 flex-1">
-                      <span
-                        className={`block truncate text-sm ${isCurrent ? "font-medium text-amber-100" : ""}`}
-                      >
-                        {s.title}
-                      </span>
-                      <span className="block truncate text-xs text-white/45">{s.artist}</span>
+                      <Marquee
+                        text={s.title}
+                        className={`text-sm ${isCurrent ? "font-medium text-amber-100" : ""}`}
+                      />
+                      <Marquee text={s.artist} className="text-xs text-white/45" />
                     </span>
                   </button>
                 </li>

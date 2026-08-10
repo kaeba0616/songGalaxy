@@ -6,8 +6,11 @@
  * 알약(미니플레이어)의 크기가 곡 제목 길이에 따라 들쭉날쭉하지 않도록,
  * 자리는 고정해 두고 넘치는 글자만 움직인다.
  * 같은 글자를 두 벌 이어 붙이고 정확히 절반만큼 밀어 끊김 없이 반복한다.
+ *
+ * 재생 목록처럼 수십 줄에 함께 쓰이므로, 화면에 보이는 줄만 재고 움직인다.
+ * 태그가 span인 것은 <button> 안(재생 목록 항목)에서도 올바른 마크업이 되게 하기 위함.
  */
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** 반복 시 두 벌 사이의 간격(px) — tailwind pr-8과 맞춘다 */
 const GAP = 32;
@@ -15,12 +18,29 @@ const GAP = 32;
 const SPEED = 30;
 
 export default function Marquee({ text, className = "" }: { text: string; className?: string }) {
-  const boxRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLSpanElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
   /** 0이면 넘치지 않아 움직이지 않는다 */
   const [duration, setDuration] = useState(0);
+  /** 화면 밖 줄은 재지도, 움직이지도 않는다 (목록 150줄 대비) */
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const io = new IntersectionObserver(([e]) => setVisible(e.isIntersecting), {
+      rootMargin: "64px",
+    });
+    io.observe(box);
+    return () => io.disconnect();
+  }, []);
 
   useLayoutEffect(() => {
+    if (!visible) return;
     const measure = () => {
       const box = boxRef.current;
       const span = textRef.current;
@@ -32,23 +52,25 @@ export default function Marquee({ text, className = "" }: { text: string; classN
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [text]);
+  }, [text, visible]);
+
+  const animating = duration > 0 && visible;
 
   return (
-    <div ref={boxRef} className={`overflow-hidden ${className}`}>
-      <div
-        className={`flex w-max ${duration ? "animate-marquee" : ""}`}
-        style={duration ? { animationDuration: `${duration}s` } : undefined}
+    <span ref={boxRef} className={`block overflow-hidden whitespace-nowrap ${className}`}>
+      <span
+        className={`flex w-max ${animating ? "animate-marquee" : ""}`}
+        style={animating ? { animationDuration: `${duration}s` } : undefined}
       >
-        <span ref={textRef} className={duration ? "pr-8" : ""}>
+        <span ref={textRef} className={animating ? "pr-8" : "block max-w-full truncate"}>
           {text}
         </span>
-        {duration > 0 && (
+        {animating && (
           <span className="pr-8" aria-hidden>
             {text}
           </span>
         )}
-      </div>
-    </div>
+      </span>
+    </span>
   );
 }
