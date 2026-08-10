@@ -415,6 +415,31 @@ export default function GalaxyCanvas({
   }, [cards]);
 
   /**
+   * 카드 위에서 휠을 굴리면 캐러셀이 가로로 움직인다.
+   * 가로 스크롤 컨테이너는 세로 휠에 기본 반응하지 않아서, 마우스만 쓰면
+   * 좌우 화살표 버튼을 일일이 눌러야 했다.
+   *
+   * React의 onWheel은 수동(passive) 리스너라 preventDefault가 통하지 않으므로
+   * 네이티브 리스너를 직접 붙인다.
+   */
+  useEffect(() => {
+    const el = cardScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      // 트랙패드 가로 스와이프는 브라우저 기본 동작에 맡긴다
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      if (el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      // deltaMode 1 = 줄 단위로 보고하는 마우스 — 픽셀로 환산
+      const step = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      // behavior auto: scroll-smooth 클래스를 무시하고 한 틱씩 즉시 반응하게
+      el.scrollBy({ left: step, behavior: "auto" });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [cards]);
+
+  /**
    * 카드 목록 열기/닫기.
    * 미니플레이어 숨김 신호를 같은 커밋에 함께 보내야 알약과 캐러셀이 겹치지 않는다.
    * (이펙트로 한 박자 뒤에 보내면 느린 기기에서 둘이 몇 초씩 같이 보인다)
