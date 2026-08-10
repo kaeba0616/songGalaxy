@@ -237,16 +237,22 @@ export default function MiniPlayer() {
 
       {/* 알약 본체 */}
       <div className="flex max-w-[92vw] items-center gap-2.5 rounded-full border border-white/15 bg-black/80 py-2 pl-2 pr-2.5 shadow-xl backdrop-blur">
+        {/* 재생 중이면 원반처럼 돌아 "지금 나오고 있다"를 알린다.
+            일시정지하면 멈추되 각도는 유지 (다시 누르면 그 자리에서 이어 돈다) */}
         {m?.artworkUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지, 최적화 프록시 불필요
           <img
             src={m.artworkUrl}
             alt=""
             draggable={false}
-            className="h-9 w-9 shrink-0 rounded-full object-cover"
+            style={{ animationPlayState: isPaused ? "paused" : "running" }}
+            className="animate-disc h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-white/20"
           />
         ) : (
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/10 text-sm text-amber-100">
+          <div
+            style={{ animationPlayState: isPaused ? "paused" : "running" }}
+            className="animate-disc grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/10 text-sm text-amber-100 ring-1 ring-white/20"
+          >
             ✦
           </div>
         )}

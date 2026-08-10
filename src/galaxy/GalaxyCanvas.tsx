@@ -2400,7 +2400,8 @@ export default function GalaxyCanvas({
               {cards.songs.map((song) => {
                 const m = media[song.id];
                 const isPlaying = playingId === song.id && !isPaused;
-                // 재생 중인 곡은 살짝 키워 눈에 띄게 한다.
+                // 재생 중인 곡만 원래 크기로 두고 나머지를 줄여 눈에 띄게 한다.
+                // (재생 카드를 키우면 캐러셀 높이를 넘어 위아래가 잘린다)
                 // 폭(w-40)은 그대로 두고 transform만 쓴다 — 가운데 정렬 계산이 흔들리지 않게
                 const isCurrent = playingId === song.id;
                 return (
@@ -2408,8 +2409,8 @@ export default function GalaxyCanvas({
                     key={song.id}
                     className={`relative w-40 shrink-0 snap-start overflow-hidden rounded-xl border bg-white/5 text-left backdrop-blur transition duration-200 hover:bg-white/10 ${
                       isCurrent
-                        ? "z-10 scale-110 border-amber-200/50 shadow-lg shadow-amber-200/10"
-                        : `hover:border-white/30 ${focusedCardId === song.id ? "border-white/30" : "border-white/10"}`
+                        ? "z-10 border-amber-200/50 shadow-lg shadow-amber-200/10"
+                        : `scale-90 opacity-80 hover:border-white/30 ${focusedCardId === song.id ? "border-white/30" : "border-white/10"}`
                     }`}
                   >
                     {/* 카드 클릭 → 곡 상세 페이지 */}

@@ -127,6 +127,21 @@ body {
   }
 }
 
+/* 미니플레이어 썸네일 — 재생 중이면 원반처럼 돈다 (일시정지하면 그 각도에서 멈춤) */
+@keyframes disc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.animate-disc {
+  animation: disc-spin 6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-disc {
+    animation: none;
+  }
+}
+
 /* 카드 캐러셀 스크롤바 숨김 */
 .scrollbar-none {
   scrollbar-width: none;
