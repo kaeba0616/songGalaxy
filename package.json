@@ -12,7 +12,8 @@
     "ingest": "tsx --env-file=.env scripts/ingest-dataset.ts",
     "ingest:features": "tsx --env-file=.env scripts/ingest-features.ts",
     "ingest:new": "tsx --env-file=.env scripts/ingest-new-releases.ts",
-    "expand:artists": "tsx --env-file=.env scripts/expand-artists.ts"
+    "expand:artists": "tsx --env-file=.env scripts/expand-artists.ts",
+    "refresh:media": "tsx --env-file=.env scripts/refresh-media.ts"
   },
   "dependencies": {
     "csv-parse": "^6.1.0",

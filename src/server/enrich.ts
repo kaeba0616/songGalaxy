@@ -15,6 +15,19 @@ interface Lookup {
 
 const EMPTY: Media = { artworkUrl: null, previewUrl: null };
 
+/**
+ * 아트도 미리듣기도 못 구한 곡을 다시 조회하기까지의 유예 기간.
+ *
+ * 빈 결과를 "이 곡엔 미디어가 없다"로 영구 캐시하면 안 된다. 실제로 그렇게
+ * 굳어버린 324곡을 나중에 다시 조회해보니 Sam Smith, Beyoncé처럼 스토어에
+ * 멀쩡히 있는 곡들이 전부 정상적으로 나왔다 — 조회 당시 외부 API가 잠깐
+ * 결과를 못 준 것이었다(응답은 200이라 실패로도 잡히지 않는다).
+ *
+ * 그렇다고 매번 재조회하면 진짜 없는 곡 때문에 외부 API를 계속 두들기게 되므로,
+ * 이 기간이 지난 빈 캐시만 다시 조회한다.
+ */
+const EMPTY_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
+
 const looselyEqual = (a: string, b: string) =>
   !!a && !!b && (a === b || a.includes(b) || b.includes(a));
 
@@ -139,7 +152,12 @@ export async function enrichSongs(ids: number[]): Promise<Record<number, Media>>
 
   const result: Record<number, Media> = {};
   for (const row of rows) {
-    if (row.enrichedAt) {
+    // 하나라도 건진 캐시는 그대로 쓰고, 통째로 빈 캐시는 유예 기간이 지나면 다시 조회한다
+    const cached =
+      row.artworkUrl !== null ||
+      row.previewUrl !== null ||
+      Date.now() - (row.enrichedAt?.getTime() ?? 0) < EMPTY_RETRY_MS;
+    if (row.enrichedAt && cached) {
       result[row.id] = { artworkUrl: row.artworkUrl, previewUrl: row.previewUrl };
       continue;
     }

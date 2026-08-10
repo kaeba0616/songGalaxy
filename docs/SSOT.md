@@ -30,9 +30,10 @@
 | 좌표 수학 유틸 | `src/lib/layout-math.ts` | 배치 스크립트·즉석 편입이 공용 | scripts/lib에서 이동 |
 | 장르→성단 매핑 | `src/config/genre-clusters.ts` | `themes` 테이블 (`scripts/build-themes.ts`가 생성) | 성단 12개·색상 포함. 매핑 변경은 신규 곡에만 적용 |
 | 행성 테마 팔레트 | `src/config/planet-themes.ts` | `users.planet_theme`(slug 저장), 밤하늘 렌더링 | 꾸미기 맛보기(이슈 #10). 테마 추가는 여기서만 |
-| 앨범아트·미리듣기 | 외부 iTunes Search API → 없으면 Deezer 공개 API (`src/server/enrich.ts`) | `songs.artwork_url/preview_url` (파생 캐시, `/api/enrich`) | `enriched_at`으로 조회 여부 기록. 두 곳 다 응답 실패 시에만 캐시 안 함(재시도). 후보 3건을 받아 제목·가수 일치 점수로 고른다(둘 다 일치 요구 금지 — 스토어가 가수명을 현지어로 돌려줌). **URL만 저장하고 음원 파일은 보관하지 않는다** (양 API 조건) |
+| 앨범아트·미리듣기 | 외부 iTunes Search API → 없으면 Deezer 공개 API (`src/server/enrich.ts`) | `songs.artwork_url/preview_url` (파생 캐시, `/api/enrich`) | `enriched_at`으로 조회 여부 기록. 두 곳 다 응답 실패 시에만 캐시 안 함(재시도). 아트도 미리듣기도 못 구한 캐시는 `EMPTY_RETRY_MS`(7일)가 지나면 다시 조회 — 빈 결과를 영구 캐시하면 안 됨(실측 324곡이 그렇게 굳었다가 재조회로 306곡 복구). 일괄 재조회 CLI: `npm run refresh:media`. 후보 3건을 받아 제목·가수 일치 점수로 고른다(둘 다 일치 요구 금지 — 스토어가 가수명을 현지어로 돌려줌). **URL만 저장하고 음원 파일은 보관하지 않는다** (양 API 조건) |
 | 가수 정보 | 외부 MusicBrainz API (CC0) | `artists` 테이블 (파생 캐시, `src/server/artist-info.ts`) | 이름당 1회 조회. 검색 점수 85 미만은 버림(오매칭 방지) |
 | 가사 | 외부 LRCLIB API | `songs.plain_lyrics/synced_lyrics` (파생 캐시, `src/server/lyrics.ts`) | 곡당 1회 조회. 출처 표기 필수 |
+| 외부 데이터 출처 표기 | `src/components/DataCredits.tsx`의 `SOURCES` | `/credits` 페이지, /songs·/songs/[id]·/me 푸터, 은하 좌상단 한 줄 | 새 외부 소스를 붙이면 여기에만 추가한다. 페이지에 출처를 따로 적지 않는다. Last.fm은 API 약관이 출처 표기와 백링크를 요구 |
 | YouTube 영상 ID | 외부 YouTube Data API | `songs.youtube_video_id` (파생 캐시, `src/server/youtube.ts`) | 곡당 1회 검색(쿼터 100곡/일). 키 없으면 검색 링크 폴백 |
 | 곡 좌표 | `songs.pos_x/y/z` (`scripts/layout-songs.ts`가 1회 기록) | 렌더러 페이로드 | 기록 후 불변. NULL인 곡만 채움. 배치 수학: `scripts/lib/layout-math.ts` |
 | 로그인·좋아요·내 별 클라이언트 상태 | `src/likes/likes-context.tsx` (`LikesProvider`) | `GalaxyCanvas`·`MiniPlayer`의 ♥ | 서버 원본은 `likes` 테이블, 창구는 `/api/likes`. 컴포넌트에서 `/api/likes` 직접 호출·중복 보관 금지 (예외: `LikeButton`은 서버가 넘긴 initialLiked로 동작 — 추후 통합 대상) |
