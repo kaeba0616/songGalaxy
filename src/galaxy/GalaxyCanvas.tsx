@@ -91,6 +91,12 @@ const CORE_FRAGMENT = /* glsl */ `
   }
 `;
 
+/** 라벨 글자 갱신 — 글자는 호버 확대를 위해 안쪽 span에 들어 있다 (makeLabel 참조) */
+function setLabelText(el: HTMLDivElement, text: string): void {
+  const inner = el.firstElementChild as HTMLElement | null;
+  if (inner) inner.textContent = text;
+}
+
 function makePointsLayer(
   positions: Float32Array,
   colors: Float32Array,
@@ -622,7 +628,12 @@ export default function GalaxyCanvas({
       onClick?: () => void,
     ): HTMLDivElement => {
       const el = document.createElement("div");
-      el.textContent = text;
+      // 글자는 안쪽 span에 둔다 — 바깥 div의 transform은 화면 투영이 매 프레임
+      // 덮어쓰므로, 호버 확대 같은 연출은 안쪽에서만 걸 수 있다
+      const inner = document.createElement("span");
+      inner.className = "galaxy-label-text";
+      inner.textContent = text;
+      el.appendChild(inner);
       el.className = `galaxy-label ${cls}`;
       if (color) el.style.color = color;
       if (onClick) {
@@ -1523,6 +1534,31 @@ export default function GalaxyCanvas({
         }
       }
     };
+    /**
+     * 라벨 위에서 굴린 휠은 캔버스로 전달한다.
+     * 클릭 가능한 라벨은 pointer-events가 켜져 있어 휠 이벤트를 삼키는데,
+     * OrbitControls는 캔버스에만 붙어 있어 그 자리에서 줌이 멈춰 보였다.
+     */
+    const onLabelWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      renderer.domElement.dispatchEvent(
+        new WheelEvent("wheel", {
+          deltaX: e.deltaX,
+          deltaY: e.deltaY,
+          deltaZ: e.deltaZ,
+          deltaMode: e.deltaMode,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+          metaKey: e.metaKey,
+          cancelable: true,
+        }),
+      );
+    };
+    labelLayer.addEventListener("wheel", onLabelWheel, { passive: false });
+
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("pointermove", onPointerMove);
@@ -1703,7 +1739,7 @@ export default function GalaxyCanvas({
           const slot = songLabels[k];
           const has = k < nearCount;
           slot.index = has ? nearI[k] : -1;
-          if (has) slot.el.textContent = payload.songs.title[nearI[k]];
+          if (has) setLabelText(slot.el, payload.songs.title[nearI[k]]);
         }
       }
       if (positions) {
@@ -1797,6 +1833,7 @@ export default function GalaxyCanvas({
       disposed = true;
       cancelAnimationFrame(frameId);
       window.removeEventListener("resize", resize);
+      labelLayer.removeEventListener("wheel", onLabelWheel);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
