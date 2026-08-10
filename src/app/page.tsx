@@ -17,9 +17,17 @@ export default async function Home(props: {
   const { song, star } = await props.searchParams;
   const songId = Number(song);
   return (
-    <GalaxyCanvas
-      initialSongId={Number.isInteger(songId) ? songId : undefined}
-      focusMyStar={star === "me"}
-    />
+    <>
+      {/*
+        은하 데이터를 HTML 파싱 단계에서 미리 받기 시작한다.
+        이게 없으면 JS 번들 로드·하이드레이션이 끝난 뒤에야 요청이 나가서
+        첫 화면이 1초 넘게 늦어진다 (실측: 요청 시작이 1.65초 지점).
+      */}
+      <link rel="preload" href="/api/galaxy" as="fetch" />
+      <GalaxyCanvas
+        initialSongId={Number.isInteger(songId) ? songId : undefined}
+        focusMyStar={star === "me"}
+      />
+    </>
   );
 }

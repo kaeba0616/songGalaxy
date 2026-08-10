@@ -51,13 +51,20 @@ export async function GET(): Promise<NextResponse> {
     },
     themes,
   };
+  /**
+   * 좌표를 소수점 한 자리로 줄인다.
+   * 은하 반지름이 1000이라 0.1은 별 하나 크기보다 훨씬 작은 차이인데,
+   * DB의 float는 "-121.57167"처럼 길게 직렬화돼 페이로드를 크게 부풀린다.
+   */
+  const round1 = (v: number | null) => Math.round((v ?? 0) * 10) / 10;
+
   songRows.forEach((s, i) => {
     payload.songs.id[i] = s.id;
     payload.songs.title[i] = s.title;
     payload.songs.artist[i] = s.artist;
-    payload.songs.pos[i * 3] = s.posX ?? 0;
-    payload.songs.pos[i * 3 + 1] = s.posY ?? 0;
-    payload.songs.pos[i * 3 + 2] = s.posZ ?? 0;
+    payload.songs.pos[i * 3] = round1(s.posX);
+    payload.songs.pos[i * 3 + 1] = round1(s.posY);
+    payload.songs.pos[i * 3 + 2] = round1(s.posZ);
     payload.songs.popularity[i] = s.popularity;
     payload.songs.themeId[i] = s.themeId ?? 0;
   });

@@ -563,6 +563,16 @@ export default function GalaxyCanvas({
     let disposed = false;
     let frameId = 0;
 
+    /**
+     * 네트워크를 가장 먼저 띄운다.
+     * 아래 WebGL 씬 구성(셰이더 컴파일·배경별 생성 등)이 1초 가까이 걸리는데,
+     * 그동안 요청이 놀고 있으면 그만큼 첫 화면이 늦어진다. 겹쳐서 진행시킨다.
+     */
+    const payloadPromise = fetch("/api/galaxy").then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json() as Promise<GalaxyPayload>;
+    });
+
     // 터치 기기는 필레이트가 약해 해상도·MSAA·글로우층을 줄인다 (모바일 렉 대책)
     const isCoarse = window.matchMedia("(pointer: coarse)").matches;
 
@@ -1593,12 +1603,8 @@ export default function GalaxyCanvas({
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("dblclick", onDblClick);
 
-    // 데이터 로드 → 씬 구성
-    fetch("/api/galaxy")
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<GalaxyPayload>;
-      })
+    // 데이터 도착 → 씬 구성 (요청은 이 이펙트 맨 앞에서 이미 보냈다)
+    payloadPromise
       .then((data) => {
         if (disposed) return;
         payload = data;
