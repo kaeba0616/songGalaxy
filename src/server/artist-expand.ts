@@ -62,6 +62,14 @@ export interface ExpandOptions {
    * 부수적으로 "거의 아무도 안 듣는 곡"을 거르는 품질 기준 역할도 한다.
    */
   minListenerShare?: number;
+  /**
+   * 원제(비ASCII 제목)에 적용하는 완화된 하한선.
+   *
+   * 로마자·번역 중복은 예외 없이 ASCII 제목이고 청취자가 적다. 반대로 일본어·한글
+   * 원제는 청취자가 적어도 진짜 곡이다(예: tuki.의 "第三惑星" 677명). 같은 기준을
+   * 쓰면 이런 곡을 잃으므로, 원제에는 낮은 문턱을 준다.
+   */
+  minListenerShareNonAscii?: number;
   deadlineMs?: number;
   onInsert?: (title: string, artist: string, popularity: number, count: number) => void;
 }
@@ -205,14 +213,16 @@ export async function expandArtists(opts: ExpandOptions = {}): Promise<ExpandSta
 
     // 이 가수 최고 인기곡 기준으로 하한선을 잡는다 (응답이 인기순이라 첫 곡이 최고)
     const topListeners = Number(tracks[0]?.listeners ?? 0);
-    const minListeners = topListeners * (opts.minListenerShare ?? 0.05);
+    const asciiFloor = topListeners * (opts.minListenerShare ?? 0.05);
+    const nonAsciiFloor = topListeners * (opts.minListenerShareNonAscii ?? 0.02);
 
     let addedForArtist = 0;
     for (const track of tracks) {
       if (addedForArtist >= perArtist || stats.inserted >= totalLimit) break;
       const title = track.name?.trim();
       if (!title) continue;
-      if (Number(track.listeners ?? 0) < minListeners) {
+      const isAscii = !/[^ -~]/.test(title);
+      if (Number(track.listeners ?? 0) < (isAscii ? asciiFloor : nonAsciiFloor)) {
         stats.tooQuiet++;
         continue;
       }
