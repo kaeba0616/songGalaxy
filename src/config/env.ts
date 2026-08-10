@@ -32,4 +32,8 @@ export const env = {
   get cronSecret(): string | null {
     return process.env.CRON_SECRET ?? null;
   },
+  /** 선택값 — 아티스트 대표곡 확장(scripts/expand-artists.ts)에 필요. 없으면 확장은 건너뛴다 */
+  get lastfmApiKey(): string | null {
+    return process.env.LASTFM_API_KEY ?? null;
+  },
 };
