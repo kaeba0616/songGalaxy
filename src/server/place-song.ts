@@ -1,6 +1,7 @@
 import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { AUDIO_FEATURE_KEYS, GALAXY_RADIUS, PLACEMENT_NEIGHBORS } from "@/config/constants";
+import { GALAXY_RADIUS } from "@/config/constants";
+import { buildNeighborPool, pointFromNeighbors } from "@/lib/neighbor-place";
 import { hashString, mulberry32 } from "@/lib/layout-math";
 import { baseTitleKey, normalizeKey, primaryArtistKey } from "@/lib/match-key";
 
@@ -109,49 +110,13 @@ async function placeByFeatures(
         isNotNull(schema.songs.features),
       ),
     );
-  const pool = neighbours.filter((n) => n.features && n.x != null);
-  if (pool.length < PLACEMENT_NEIGHBORS) return null;
-
-  // 이 장르 안에서의 평균·표준편차로 정규화 (배치 스크립트와 같은 z-score 방식)
-  const mean: number[] = [];
-  const std: number[] = [];
-  AUDIO_FEATURE_KEYS.forEach((key, j) => {
-    const vals = pool.map((n) => Number(n.features?.[key] ?? 0));
-    const m = vals.reduce((a, b) => a + b, 0) / vals.length;
-    const v = vals.reduce((a, b) => a + (b - m) ** 2, 0) / vals.length;
-    mean[j] = m;
-    std[j] = Math.sqrt(v) || 1;
-  });
-  const z = (f: Record<string, number> | null) =>
-    AUDIO_FEATURE_KEYS.map((key, j) => (Number(f?.[key] ?? 0) - mean[j]) / std[j]);
-
-  const target = z(features);
-  const scored = pool
-    .map((n) => {
-      const v = z(n.features);
-      let d2 = 0;
-      for (let j = 0; j < target.length; j++) d2 += (v[j] - target[j]) ** 2;
-      return { n, d: Math.sqrt(d2) };
-    })
-    .sort((a, b) => a.d - b.d)
-    .slice(0, PLACEMENT_NEIGHBORS);
-
-  // 가까운 이웃일수록 크게 반영
-  let sx = 0, sy = 0, sz = 0, sw = 0;
-  for (const { n, d } of scored) {
-    const w = 1 / (d + 0.1);
-    sx += n.x! * w;
-    sy += n.y! * w;
-    sz += n.z! * w;
-    sw += w;
-  }
-  // 이웃과 완전히 겹치지 않게 아주 작은 흔들림만 더한다
-  const jitter = (subTheme.radius ?? 40) * 0.05;
-  return {
-    x: sx / sw + (rng() * 2 - 1) * jitter,
-    y: sy / sw + (rng() * 2 - 1) * jitter,
-    z: sz / sw + (rng() * 2 - 1) * jitter,
-  };
+  const pool = buildNeighborPool(
+    neighbours
+      .filter((n) => n.x != null && n.y != null && n.z != null)
+      .map((n) => ({ x: n.x!, y: n.y!, z: n.z!, features: n.features })),
+  );
+  if (!pool) return null;
+  return pointFromNeighbors(pool, features, rng, (subTheme.radius ?? 40) * 0.05);
 }
 
 /**
