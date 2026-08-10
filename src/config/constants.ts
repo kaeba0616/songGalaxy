@@ -20,6 +20,9 @@ export const RECENT_LIKE_WEIGHT = 1.5;
 /** "최근"으로 간주하는 좋아요 개수 */
 export const RECENT_LIKE_WINDOW = 10;
 
+/** 앨범아트·미리듣기 보강 배치 크기 — /api/enrich 요청 상한과 클라이언트 배치가 공유 */
+export const ENRICH_BATCH = 12;
+
 /** 행성 프로필 — 닉네임 최대 길이 */
 export const NICKNAME_MAX = 20;
 /** 행성 프로필 — 한 줄 소개 최대 길이 */

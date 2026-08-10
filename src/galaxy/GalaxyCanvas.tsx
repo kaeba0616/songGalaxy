@@ -8,12 +8,15 @@
  * - 카드: 앨범아트 + 30초 미리듣기(iTunes 캐시), 곡 선택 시 가수 정보(MusicBrainz 캐시)
  * 좌표는 서버가 준 값 그대로 사용한다 (좌표 불변 — 카메라만 움직인다).
  */
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { BIO_MAX, MIN_LIKES_FOR_STAR, NICKNAME_MAX } from "@/config/constants";
+import { BIO_MAX, ENRICH_BATCH, MIN_LIKES_FOR_STAR, NICKNAME_MAX } from "@/config/constants";
 import { getPlanetTheme } from "@/config/planet-themes";
 import { hashString, mulberry32 } from "@/lib/layout-math";
+import { usePlayer } from "@/player/player-context";
+import type { PlayerQueue, PlayerSnapshot } from "@/player/player-context";
 import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
 
 const GALAXY_BG = "#05060f";
@@ -27,8 +30,6 @@ const SONG_LABEL_POOL = 24;
 const SONG_ZOOM_DISTANCE = 16;
 /** 하단 카드 캐러셀에 띄우는 최대 곡 수 (인기순) */
 const CARD_LIMIT = 150;
-/** 한 번에 보강 요청할 카드 수 (/api/enrich의 MAX_IDS와 일치) */
-const ENRICH_BATCH = 12;
 
 interface CardSong {
   index: number;
@@ -43,11 +44,6 @@ interface CardData {
   subtitle: string;
   color: string;
   songs: CardSong[];
-}
-
-interface Media {
-  artworkUrl: string | null;
-  previewUrl: string | null;
 }
 
 /** 행성 정보 패널 데이터 (이슈 #10) */
@@ -130,17 +126,16 @@ export default function GalaxyCanvas({
   const labelLayerRef = useRef<HTMLDivElement>(null);
   const minimapRef = useRef<HTMLCanvasElement>(null);
   const cardScrollRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const resetRef = useRef<(() => void) | null>(null);
   const exitSkyRef = useRef<(() => void) | null>(null);
   /** 특정 유저의 행성으로 착륙 (밤하늘에 있어도 안전하게 이동) */
   const landByUserRef = useRef<((userId: number) => void) | null>(null);
   /** 별 더블클릭 → 해당 곡 미리듣기 재생 요청 (three 이벤트 → React) */
-  const playRequestRef = useRef<((songId: number) => void) | null>(null);
+  const playRequestRef = useRef<
+    ((songId: number, info?: { title: string; artist: string }) => void) | null
+  >(null);
   const flySongRef = useRef<((index: number) => void) | null>(null);
-  const enrichRequested = useRef<Set<number>>(new Set());
-  /** 오디오 onended 콜백에서 최신 상태를 읽기 위한 미러 (stale closure 방지) */
-  const mediaRef = useRef<Record<number, Media>>({});
+  /** three 이벤트 콜백에서 최신 상태를 읽기 위한 미러 (stale closure 방지) */
   const cardsRef = useRef<CardData | null>(null);
   /** 씬의 유저 별 갱신 API (three 이펙트가 채움) */
   const starApiRef = useRef<((star: GalaxyStar) => void) | null>(null);
@@ -159,28 +154,25 @@ export default function GalaxyCanvas({
   /** 자동 라디오가 브라우저 정책에 막혔을 때 폴백 버튼 표시 */
   const [radioBlocked, setRadioBlocked] = useState(false);
   const autoRadioTried = useRef(false);
-  /** 미리듣기·라디오 볼륨 (localStorage에 유지) */
-  const [volume, setVolume] = useState(0.8);
-  const volumeRef = useRef(0.8);
-  const lastAudibleVolume = useRef(0.8);
-
-  useEffect(() => {
-    const raw = localStorage.getItem("songgalaxy-volume");
-    const saved = raw === null ? NaN : Number(raw);
-    if (!Number.isNaN(saved) && saved >= 0 && saved <= 1) {
-      setVolume(saved);
-      volumeRef.current = saved;
-      if (saved > 0) lastAudibleVolume.current = saved;
-    }
-  }, []);
-
-  const changeVolume = useCallback((v: number) => {
-    setVolume(v);
-    volumeRef.current = v;
-    if (v > 0) lastAudibleVolume.current = v;
-    if (audioRef.current) audioRef.current.volume = v;
-    localStorage.setItem("songgalaxy-volume", String(v));
-  }, []);
+  // 재생·볼륨·미디어 캐시의 단일 원본 (SSOT: src/player/player-context.tsx).
+  // 캔버스가 언마운트돼도 재생이 이어지도록 오디오는 이 프로바이더가 소유한다.
+  const {
+    playingId,
+    isPaused,
+    volume,
+    media,
+    fetchMedia,
+    getMedia,
+    playFrom,
+    toggle: togglePlay,
+    playStep: playerStep,
+    stop: stopPlayer,
+    changeVolume,
+    toggleMute,
+    snapshot,
+    restore,
+    setUiHosted,
+  } = usePlayer();
   const [cards, setCards] = useState<CardData | null>(null);
   /** 카드 목록 접힘 상태 (헤더만 남기고 아래로 슬라이드) */
   const [cardsCollapsed, setCardsCollapsed] = useState(false);
@@ -192,10 +184,6 @@ export default function GalaxyCanvas({
   useEffect(() => {
     if (cards) setCardsCollapsed(false);
   }, [cards]);
-  const [media, setMedia] = useState<Record<number, Media>>({});
-  const [playingId, setPlayingId] = useState<number | null>(null);
-  /** 일시정지 상태 — playingId는 유지한 채 위치만 멈춰 재개 가능 */
-  const [isPaused, setIsPaused] = useState(false);
   /** 포커스된 카드 (별 클릭·재생 이동으로 가운데 정렬된 곡) — 테두리 강조용 */
   const [focusedCardId, setFocusedCardId] = useState<number | null>(null);
   /** 우측 드로어 (메뉴 + 행성 프로필 편집) 열림 상태 */
@@ -274,26 +262,6 @@ export default function GalaxyCanvas({
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [songCount, setSongCount] = useState(0);
 
-  /** 곡 id 목록의 앨범아트/미리듣기를 서버 캐시에서 가져온다 (중복 요청 방지, await 가능) */
-  const fetchMedia = useCallback(async (ids: number[]): Promise<void> => {
-    const fresh = ids.filter((id) => !enrichRequested.current.has(id)).slice(0, ENRICH_BATCH);
-    if (fresh.length === 0) return;
-    fresh.forEach((id) => enrichRequested.current.add(id));
-    try {
-      const r = await fetch("/api/enrich", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: fresh }),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = (await r.json()) as Record<number, Media>;
-      mediaRef.current = { ...mediaRef.current, ...data };
-      setMedia((prev) => ({ ...prev, ...data }));
-    } catch {
-      fresh.forEach((id) => enrichRequested.current.delete(id));
-    }
-  }, []);
-
   /** 카드 스크롤 시 화면에 들어온 카드들을 보강 */
   const onCardScroll = useCallback(() => {
     const el = cardScrollRef.current;
@@ -322,38 +290,33 @@ export default function GalaxyCanvas({
     });
   }, []);
 
-  /** 미리듣기가 끝나면 다음 곡으로 자동 진행 (미리듣기 없는 곡은 건너뜀) */
-  const playNextRef = useRef<(afterId: number) => Promise<void>>(async () => {});
-
-  const playSong = useCallback((songId: number, previewUrl: string): Promise<void> => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio();
-    }
-    const audio = audioRef.current;
-    audio.volume = volumeRef.current;
-    audio.src = previewUrl;
-    audio.onended = () => void playNextRef.current(songId);
-    setPlayingId(songId);
-    setIsPaused(false);
-    return audio.play();
-  }, []);
+  /** 카드 목록을 전역 플레이어의 큐 형태로 변환 (재생 목록의 원본은 항상 이 카드 목록) */
+  const toQueue = useCallback(
+    (cardData: CardData): PlayerQueue => ({
+      title: cardData.title,
+      songs: cardData.songs.map((s) => ({ id: s.id, title: s.title, artist: s.artist })),
+    }),
+    [],
+  );
 
   /** 착륙 후 자동 라디오 (이슈 #10) — 첫 미리듣기 곡부터 연속 재생 시작 */
-  const tryRadio = useCallback(async (cardData: CardData | null = cardsRef.current) => {
-    if (!cardData || cardData.songs.length === 0) return;
-    const firstBatch = cardData.songs.slice(0, ENRICH_BATCH);
-    await fetchMedia(firstBatch.map((s) => s.id));
-    const target = firstBatch.find((s) => mediaRef.current[s.id]?.previewUrl);
-    if (!target) return;
-    try {
-      await playSong(target.id, mediaRef.current[target.id]!.previewUrl!);
-      setRadioBlocked(false);
-    } catch {
-      // 브라우저 자동재생 정책에 차단 — 수동 시작 버튼 폴백
-      setPlayingId(null);
-      setRadioBlocked(true);
-    }
-  }, [fetchMedia, playSong]);
+  const tryRadio = useCallback(
+    async (cardData: CardData | null = cardsRef.current) => {
+      if (!cardData || cardData.songs.length === 0) return;
+      const firstBatch = cardData.songs.slice(0, ENRICH_BATCH);
+      await fetchMedia(firstBatch.map((s) => s.id));
+      const target = firstBatch.find((s) => getMedia(s.id)?.previewUrl);
+      if (!target) return;
+      try {
+        await playFrom(toQueue(cardData), target.id);
+        setRadioBlocked(false);
+      } catch {
+        // 브라우저 자동재생 정책에 차단 — 수동 시작 버튼 폴백
+        setRadioBlocked(true);
+      }
+    },
+    [fetchMedia, getMedia, playFrom, toQueue],
+  );
 
   useEffect(() => {
     if (skyInfo && cards) {
@@ -368,69 +331,33 @@ export default function GalaxyCanvas({
   }, [skyInfo, cards, tryRadio]);
 
   // 별 더블클릭 재생 (미리듣기 URL을 그 자리에서 확보한 뒤 재생)
-  playRequestRef.current = (songId: number) => {
+  playRequestRef.current = (songId, info) => {
     void (async () => {
-      await fetchMedia([songId]);
-      const m = mediaRef.current[songId];
-      if (m?.previewUrl) {
-        playSong(songId, m.previewUrl).catch(() => setPlayingId(null));
-      } else {
+      const cardData = cardsRef.current;
+      // 열린 목록에 없는 곡(은하에서 직접 찍은 별)은 그 곡 하나짜리 큐로 재생
+      const queue: PlayerQueue = cardData?.songs.some((s) => s.id === songId)
+        ? toQueue(cardData)
+        : { title: info?.title ?? "재생 중", songs: [{ id: songId, ...(info ?? { title: "재생 중", artist: "" }) }] };
+      try {
+        await playFrom(queue, songId);
+      } catch {
         setToast("이 곡은 미리듣기가 제공되지 않아요");
         setTimeout(() => setToast(null), 2500);
       }
     })();
   };
 
-  playNextRef.current = async (afterId: number) => {
-    const cardData = cardsRef.current;
-    if (!cardData) {
-      setPlayingId(null);
-      return;
-    }
-    const idx = cardData.songs.findIndex((s) => s.id === afterId);
-    if (idx < 0) {
-      setPlayingId(null);
-      return;
-    }
-    // 다음 곡부터 목록을 한 바퀴 돌며 미리듣기 있는 곡을 찾는다 — 끝나면 첫 곡으로 루프
-    const n = cardData.songs.length;
-    for (let step = 1; step <= n; step++) {
-      const i = (idx + step) % n;
-      const song = cardData.songs[i];
-      let m: Media | undefined = mediaRef.current[song.id];
-      if (!m) {
-        // 다음 곡들의 미리듣기 URL을 그 자리에서 로드
-        await fetchMedia(cardData.songs.slice(i, i + ENRICH_BATCH).map((s) => s.id));
-        m = mediaRef.current[song.id];
-      }
-      // 대기 중 카드 목록이 바뀌었으면 진행 중단
-      if (cardsRef.current !== cardData) return;
-      if (m?.previewUrl) {
-        scrollToCard(i);
-        playSong(song.id, m.previewUrl).catch(() => setPlayingId(null));
-        return;
-      }
-    }
-    setPlayingId(null); // 미리듣기 가능한 곡이 하나도 없음
-  };
-
   /** 미리듣기 토글 (한 번에 한 곡만, 끝나면 다음 곡 자동 진행) — 같은 곡은 일시정지/재개 */
   const togglePreview = useCallback(
-    (songId: number, previewUrl: string) => {
-      const audio = audioRef.current;
-      if (playingId === songId && audio) {
-        if (audio.paused) {
-          setIsPaused(false);
-          audio.play().catch(() => setPlayingId(null));
-        } else {
-          audio.pause();
-          setIsPaused(true);
-        }
+    (songId: number) => {
+      if (playingId === songId) {
+        togglePlay();
         return;
       }
-      playSong(songId, previewUrl).catch(() => setPlayingId(null));
+      const cardData = cardsRef.current;
+      if (cardData) void playFrom(toQueue(cardData), songId).catch(() => undefined);
     },
-    [playingId, playSong],
+    [playingId, togglePlay, playFrom, toQueue],
   );
 
   /** 헤더 재생 컨트롤 — 이전/다음 곡 (미리듣기 없는 곡은 건너뜀) */
@@ -438,60 +365,50 @@ export default function GalaxyCanvas({
     async (dir: -1 | 1) => {
       const cardData = cardsRef.current;
       if (!cardData || cardData.songs.length === 0) return;
-      const n = cardData.songs.length;
-      const idx = playingId !== null ? cardData.songs.findIndex((s) => s.id === playingId) : -1;
-      const start = idx < 0 ? (dir === 1 ? 0 : n - 1) : (((idx + dir) % n) + n) % n;
-      // 목록을 순환하며 미리듣기 있는 곡을 찾는다 (끝↔처음 루프)
-      for (let step = 0; step < n; step++) {
-        const i = (((start + dir * step) % n) + n) % n;
-        const song = cardData.songs[i];
-        let m: Media | undefined = mediaRef.current[song.id];
-        if (!m) {
-          const batch =
-            dir === 1
-              ? cardData.songs.slice(i, i + ENRICH_BATCH)
-              : cardData.songs.slice(Math.max(0, i - ENRICH_BATCH + 1), i + 1);
-          await fetchMedia(batch.map((s) => s.id));
-          m = mediaRef.current[song.id];
-        }
-        // 대기 중 카드 목록이 바뀌었으면 진행 중단
-        if (cardsRef.current !== cardData) return;
-        if (m?.previewUrl) {
-          scrollToCard(i);
-          playSong(song.id, m.previewUrl).catch(() => setPlayingId(null));
-          return;
-        }
-      }
+      // 목록을 열어둔 채 다른 곡을 듣고 있었다면 이 목록으로 큐를 되돌린다
+      await playerStep(dir, toQueue(cardData));
     },
-    [playingId, fetchMedia, playSong, scrollToCard],
+    [playerStep, toQueue],
   );
 
   /** 헤더 재생/일시정지 — 재생 중이면 토글, 없으면 목록 첫 미리듣기 곡부터 시작 */
   const toggleMainPlay = useCallback(() => {
-    const audio = audioRef.current;
-    if (playingId !== null && audio && audio.src) {
-      if (audio.paused) {
-        setIsPaused(false);
-        audio.play().catch(() => setPlayingId(null));
-      } else {
-        audio.pause();
-        setIsPaused(true);
-      }
+    if (playingId !== null) {
+      togglePlay();
       return;
     }
     void playStep(1);
-  }, [playingId, playStep]);
+  }, [playingId, togglePlay, playStep]);
 
-  // 카드 목록 미러 + 카드가 닫히면 재생도 정지
+  // 카드 목록 미러 (카드를 닫아도 재생은 이어진다 — 미니플레이어가 이어받음)
   useEffect(() => {
     cardsRef.current = cards;
     setFocusedCardId(null); // 목록이 바뀌면 이전 포커스 해제 (필요 시 scrollToCard가 다시 세팅)
-    if (!cards) {
-      audioRef.current?.pause();
-      setPlayingId(null);
-      setIsPaused(false);
-    }
   }, [cards]);
+
+  // 카드 패널이 열려 있는 동안은 전역 미니플레이어를 숨긴다 (재생 UI 중복 방지)
+  useEffect(() => {
+    setUiHosted(cards !== null);
+    return () => setUiHosted(false);
+  }, [cards, setUiHosted]);
+
+  // 재생 곡이 바뀌면 그 카드를 가운데로 (플레이어가 자동 진행한 경우 포함)
+  useEffect(() => {
+    if (playingId === null) return;
+    const i = cardsRef.current?.songs.findIndex((s) => s.id === playingId) ?? -1;
+    if (i >= 0) scrollToCard(i);
+  }, [playingId, scrollToCard]);
+
+  /**
+   * 행성 착륙 전 은하에서 듣던 곡 — 은하로 나올 때 이 곡을 그 위치부터 이어 듣는다.
+   * 행성→행성 이동에서는 유지해야 하므로 착륙 시퀀스가 직접 관리한다.
+   */
+  const galaxySnapshot = useRef<PlayerSnapshot | null>(null);
+  /** three 이펙트(마운트 1회)에서 최신 플레이어 API를 읽기 위한 미러 */
+  const playerApiRef = useRef({ snapshot, restore, stop: stopPlayer });
+  useEffect(() => {
+    playerApiRef.current = { snapshot, restore, stop: stopPlayer };
+  }, [snapshot, restore, stopPlayer]);
 
   // 로그인·좋아요·내 별 상태 로드 (클라이언트 상태의 단일 출처: /api/likes)
   useEffect(() => {
@@ -1296,6 +1213,8 @@ export default function GalaxyCanvas({
     };
     const landOnStar = (entry: StarEntry) => {
       if (skyActive || pendingSky) return;
+      // 은하에서 듣던 곡을 기억 — 착륙하면 행성 라디오로 바뀌고, 나올 때 여기서 이어 듣는다
+      galaxySnapshot.current = playerApiRef.current.snapshot();
       pendingSky = { entry, songIds: null };
       setCards(null);
       setSkyInfo({ userId: entry.data.userId, nickname: entry.data.nickname });
@@ -1402,13 +1321,23 @@ export default function GalaxyCanvas({
       controls.maxPolarAngle = Math.PI;
       setSkyInfo(null);
       setCards(null);
+      // 행성 라디오를 끄고, 착륙 전 은하에서 듣던 곡을 그 위치부터 이어 재생
+      const snap = galaxySnapshot.current;
+      galaxySnapshot.current = null;
+      if (snap) void playerApiRef.current.restore(snap);
+      else playerApiRef.current.stop();
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
     exitSkyRef.current = exitSky;
     landByUserRef.current = (uid: number) => {
       const target = userStars.find((s) => s.data.userId === uid);
       if (!target) return;
-      if (skyActive) exitSky(); // 다른 행성에 있었다면 정리 후 출발
+      if (skyActive) {
+        // 행성→행성 이동: 은하 스냅샷은 그대로 두고 정리만 한다
+        const keep = galaxySnapshot.current;
+        exitSky();
+        galaxySnapshot.current = keep;
+      }
       landOnStar(target);
     };
 
@@ -1560,7 +1489,12 @@ export default function GalaxyCanvas({
         const hit = raycaster.intersectObject(skyHighlightPoints)[0];
         raycaster.params.Points.threshold = 6;
         const si = hit?.index != null ? skyHighlightIdx[hit.index] : undefined;
-        if (si != null) playRequestRef.current?.(payload.songs.id[si]);
+        if (si != null) {
+          playRequestRef.current?.(payload.songs.id[si], {
+            title: payload.songs.title[si],
+            artist: payload.songs.artist[si],
+          });
+        }
         return;
       }
       if (pendingSky) return; // 착륙 연출 중이면 무시
@@ -1574,7 +1508,10 @@ export default function GalaxyCanvas({
       const hit = raycaster.intersectObject(points)[0];
       // 카드 열기·포커스는 더블클릭의 첫 클릭(flySong)이 이미 처리 — 여기선 재생 + 근접 줌
       if (hit?.index != null) {
-        playRequestRef.current?.(payload.songs.id[hit.index]);
+        playRequestRef.current?.(payload.songs.id[hit.index], {
+          title: payload.songs.title[hit.index],
+          artist: payload.songs.artist[hit.index],
+        });
         if (positions) {
           // 곡 제목 라벨이 또렷이 보이는 거리까지 확대
           const p = new THREE.Vector3(
@@ -1874,7 +1811,7 @@ export default function GalaxyCanvas({
       renderer.dispose();
       container.removeChild(renderer.domElement);
       labelLayer.replaceChildren();
-      audioRef.current?.pause();
+      // 오디오는 전역 플레이어 소유 — 여기서 멈추지 않는다 (페이지 이동 후에도 재생 유지)
     };
   }, []);
 
@@ -1970,12 +1907,12 @@ export default function GalaxyCanvas({
             >
               Google 로그인
             </a>
-            <a
+            <Link
               href="/songs"
               className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
             >
               곡 목록
-            </a>
+            </Link>
           </>
         )}
         {skyInfo ? (
@@ -2125,12 +2062,12 @@ export default function GalaxyCanvas({
               >
                 {likedGlowOn ? "🌟 좋아요 별 강조 끄기" : "🌟 좋아요 별 강조 켜기"}
               </button>
-              <a
+              <Link
                 href="/me"
                 className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
               >
                 ♥ 내 취향 페이지
-              </a>
+              </Link>
             </>
           ) : (
             <a
@@ -2140,12 +2077,12 @@ export default function GalaxyCanvas({
               Google 로그인
             </a>
           )}
-          <a
+          <Link
             href="/songs"
             className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
           >
             ♪ 곡 목록
-          </a>
+          </Link>
           <div className="my-1 border-t border-white/10" />
           {skyInfo ? (
             <>
@@ -2339,7 +2276,7 @@ export default function GalaxyCanvas({
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => changeVolume(volume > 0 ? 0 : lastAudibleVolume.current)}
+                  onClick={toggleMute}
                   className="text-sm text-white/70 transition hover:text-white"
                   aria-label={volume > 0 ? "음소거" : "음소거 해제"}
                   title={volume > 0 ? "음소거" : "음소거 해제"}
@@ -2403,7 +2340,7 @@ export default function GalaxyCanvas({
                     className={`relative w-40 shrink-0 snap-start overflow-hidden rounded-xl border ${focusedCardId === song.id ? "border-white/30" : "border-white/10"} bg-white/5 text-left backdrop-blur transition hover:border-white/30 hover:bg-white/10`}
                   >
                     {/* 카드 클릭 → 곡 상세 페이지 */}
-                    <a href={`/songs/${song.id}`} className="block" aria-label={`${song.title} 상세 보기`}>
+                    <Link href={`/songs/${song.id}`} className="block" aria-label={`${song.title} 상세 보기`}>
                       <div className="relative h-24 w-full bg-white/5">
                         {m?.artworkUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지, 최적화 프록시 불필요
@@ -2427,7 +2364,7 @@ export default function GalaxyCanvas({
                         <p className="truncate text-xs text-white/50">{song.artist}</p>
                         <p className="mt-0.5 text-[10px] text-white/35">인기도 {song.popularity}</p>
                       </div>
-                    </a>
+                    </Link>
                     <div className="absolute bottom-2 right-2 flex gap-1.5">
                       <button
                         type="button"
@@ -2450,7 +2387,7 @@ export default function GalaxyCanvas({
                       {m?.previewUrl && (
                         <button
                           type="button"
-                          onClick={() => togglePreview(song.id, m.previewUrl!)}
+                          onClick={() => togglePreview(song.id)}
                           className={`grid h-7 w-7 place-items-center rounded-full border text-xs transition ${isPlaying ? "border-white/60 bg-white/25 text-white" : "border-white/20 bg-white/10 text-white/70 hover:bg-white/20"}`}
                           aria-label={isPlaying ? "미리듣기 정지" : "30초 미리듣기"}
                           title="30초 미리듣기"

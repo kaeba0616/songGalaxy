@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
+import { ENRICH_BATCH } from "@/config/constants";
 import { enrichSongs } from "@/server/enrich";
 
 export const dynamic = "force-dynamic";
 
 /** 한 번에 보강할 최대 곡 수 — iTunes 비공식 레이트리밋(분당 ~20회) 보호 */
-const MAX_IDS = 12;
+const MAX_IDS = ENRICH_BATCH;
 
 /**
  * POST /api/enrich { ids: number[] }
