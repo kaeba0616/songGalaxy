@@ -28,4 +28,5 @@
 | 가사 | 외부 LRCLIB API | `songs.plain_lyrics/synced_lyrics` (파생 캐시, `src/server/lyrics.ts`) | 곡당 1회 조회. 출처 표기 필수 |
 | YouTube 영상 ID | 외부 YouTube Data API | `songs.youtube_video_id` (파생 캐시, `src/server/youtube.ts`) | 곡당 1회 검색(쿼터 100곡/일). 키 없으면 검색 링크 폴백 |
 | 곡 좌표 | `songs.pos_x/y/z` (`scripts/layout-songs.ts`가 1회 기록) | 렌더러 페이로드 | 기록 후 불변. NULL인 곡만 채움. 배치 수학: `scripts/lib/layout-math.ts` |
+| 로그인·좋아요·내 별 클라이언트 상태 | `src/likes/likes-context.tsx` (`LikesProvider`) | `GalaxyCanvas`·`MiniPlayer`의 ♥ | 서버 원본은 `likes` 테이블, 창구는 `/api/likes`. 컴포넌트에서 `/api/likes` 직접 호출·중복 보관 금지 (예외: `LikeButton`은 서버가 넘긴 initialLiked로 동작 — 추후 통합 대상) |
 | 미리듣기 재생 상태·미디어 클라이언트 캐시 | `src/player/player-context.tsx` (`PlayerProvider`) | `MiniPlayer`, `GalaxyCanvas` 재생 UI | 오디오 객체·큐·볼륨·`/api/enrich` 캐시의 단일 원본. 컴포넌트에서 `Audio` 직접 생성 금지. 설계: `docs/superpowers/specs/2026-08-10-global-player-design.md` |

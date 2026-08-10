@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ENRICH_BATCH } from "@/config/constants";
+import { useLikes } from "@/likes/likes-context";
 import { usePlayer } from "./player-context";
 
 /** 드래그로 옮긴 미니플레이어 위치 (뷰포트 좌상단 기준 px) */
@@ -59,6 +60,7 @@ export default function MiniPlayer() {
     stop,
     uiHosted,
   } = usePlayer();
+  const { auth, toggleLike } = useLikes();
   const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   /** null이면 기본 위치(하단 중앙) */
@@ -254,11 +256,24 @@ export default function MiniPlayer() {
             ✦
           </div>
         )}
-        <div className="min-w-0 max-w-48">
+        <div className="min-w-0 max-w-32 sm:max-w-48">
           <p className="truncate text-sm font-medium">{song.title}</p>
           <p className="truncate text-xs text-white/50">{song.artist}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void toggleLike(playingId)}
+            className={`grid h-7 w-7 cursor-pointer place-items-center rounded-full border text-xs transition ${
+              auth.likedIds.has(playingId)
+                ? "border-pink-400/60 bg-pink-500/25 text-pink-200"
+                : "border-white/20 bg-white/10 text-white/70 hover:bg-white/20"
+            }`}
+            aria-label={auth.likedIds.has(playingId) ? "좋아요 취소" : "좋아요"}
+            title={auth.authenticated ? "좋아요" : "로그인하고 좋아요"}
+          >
+            {auth.likedIds.has(playingId) ? "♥" : "♡"}
+          </button>
           <button
             type="button"
             onClick={() => void playStep(-1)}

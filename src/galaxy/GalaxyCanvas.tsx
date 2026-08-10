@@ -15,6 +15,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { BIO_MAX, ENRICH_BATCH, MIN_LIKES_FOR_STAR, NICKNAME_MAX } from "@/config/constants";
 import { getPlanetTheme } from "@/config/planet-themes";
 import { hashString, mulberry32 } from "@/lib/layout-math";
+import { useLikes } from "@/likes/likes-context";
 import { usePlayer } from "@/player/player-context";
 import type { PlayerQueue, PlayerSnapshot } from "@/player/player-context";
 import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
@@ -55,16 +56,6 @@ interface PlanetInfo {
   clusters?: { slug: string; label: string; color: string; n: number }[];
   /** 주인이 쓴 한 줄 소개 (행성 프로필) */
   bio?: string | null;
-}
-
-interface AuthState {
-  authenticated: boolean;
-  userId?: number;
-  nickname?: string;
-  likedIds: Set<number>;
-  likesCount: number;
-  /** 내 별 좌표 (없으면 아직 미탄생) — "내 별" 포커싱 버튼용 */
-  star: { x: number; y: number; z: number } | null;
 }
 
 const CORE_VERTEX = /* glsl */ `
@@ -150,12 +141,9 @@ export default function GalaxyCanvas({
   /** 씬의 유저 별 갱신 API (three 이펙트가 채움) */
   const starApiRef = useRef<((star: GalaxyStar) => void) | null>(null);
   const flyToPosRef = useRef<((x: number, y: number, z: number, dist: number) => void) | null>(null);
-  const [authState, setAuthState] = useState<AuthState>({
-    authenticated: false,
-    likedIds: new Set(),
-    likesCount: 0,
-    star: null,
-  });
+  // 로그인·좋아요·내 별 상태의 단일 원본 (SSOT: src/likes/likes-context.tsx).
+  // 미니플레이어의 ♥와 같은 상태를 봐야 하므로 컨텍스트에서 받아 쓴다.
+  const { auth: authState, toggleLike: toggleLikeBase, setNickname } = useLikes();
   const [toast, setToast] = useState<string | null>(null);
   /** 밤하늘 모드 정보 (착륙 중/완료 시 세팅) — 헤더 전환·정보 패널용 */
   const [skyInfo, setSkyInfo] = useState<PlanetInfo | null>(null);
@@ -247,7 +235,7 @@ export default function GalaxyCanvas({
       if (!r.ok) {
         setToast(`⚠ ${d.error ?? "저장에 실패했어요"}`);
       } else {
-        setAuthState((prev) => ({ ...prev, nickname: d.nickname }));
+        if (d.nickname) setNickname(d.nickname);
         setToast("✦ 행성 프로필을 저장했어요");
       }
     } catch {
@@ -256,7 +244,7 @@ export default function GalaxyCanvas({
       setProfileSaving(false);
       setTimeout(() => setToast(null), 2500);
     }
-  }, [profile]);
+  }, [profile, setNickname]);
   /** 좋아요 별 강조(더 크고 밝게) 표시 여부 — localStorage 유지 */
   const [likedGlowOn, setLikedGlowOn] = useState(true);
   /** 씬의 좋아요 별 강조 갱신 API (three 이펙트가 채움) — 빈 배열이면 강조 제거 */
@@ -496,37 +484,17 @@ export default function GalaxyCanvas({
     toCardsRef.current = toCards;
   }, [toCards]);
 
-  // 로그인·좋아요·내 별 상태 로드 (클라이언트 상태의 단일 출처: /api/likes)
+  // /me의 "은하에서 내 별 보기" (?star=me) — 별 좌표가 도착하면 한 번만 비행한다
+  const myStarFlown = useRef(false);
   useEffect(() => {
-    fetch("/api/likes")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (data: {
-          authenticated: boolean;
-          userId?: number;
-          nickname?: string;
-          likedIds?: number[];
-          likesCount?: number;
-          star?: { x: number; y: number; z: number } | null;
-        } | null) => {
-          if (!data) return;
-          setAuthState({
-            authenticated: data.authenticated,
-            userId: data.userId,
-            nickname: data.nickname,
-            likedIds: new Set(data.likedIds ?? []),
-            likesCount: data.likesCount ?? 0,
-            star: data.star ?? null,
-          });
-          if (data.star && data.userId != null && focusMyStar) {
-            // /me의 "은하에서 내 별 보기" — 씬 로드 후 비행하도록 약간 지연
-            const s = data.star;
-            setTimeout(() => flyToPosRef.current?.(s.x, s.y, s.z, 120), 1500);
-          }
-        },
-      )
-      .catch(() => undefined);
-  }, [focusMyStar]);
+    if (!focusMyStar || myStarFlown.current) return;
+    const s = authState.star;
+    if (!s) return;
+    myStarFlown.current = true;
+    // 씬이 자리를 잡은 뒤 날아가도록 약간 지연
+    const t = setTimeout(() => flyToPosRef.current?.(s.x, s.y, s.z, 120), 1500);
+    return () => clearTimeout(t);
+  }, [focusMyStar, authState.star]);
 
   // 좋아요 별 강조 동기화 — 좋아요 목록·토글이 바뀌거나 씬이 준비되면 다시 그린다
   useEffect(() => {
@@ -559,57 +527,27 @@ export default function GalaxyCanvas({
       });
   }, [skyInfo]);
 
-  /** 좋아요 토글 — 비로그인이면 로그인으로, 별 탄생/이동은 씬에 즉시 반영 (D6·D7) */
+  /**
+   * 좋아요 토글 — 상태 갱신은 공용 컨텍스트가 하고,
+   * 여기서는 은하에서만 필요한 후처리(별 좌표 반영·탄생 연출)를 얹는다 (D6·D7).
+   */
   const toggleLike = useCallback(
     async (songId: number) => {
-      if (!authState.authenticated) {
-        window.location.href = "/api/auth/signin?callbackUrl=/";
-        return;
-      }
-      const liked = !authState.likedIds.has(songId);
-      setAuthState((prev) => {
-        const next = new Set(prev.likedIds);
-        if (liked) next.add(songId);
-        else next.delete(songId);
-        return { ...prev, likedIds: next };
+      const data = await toggleLikeBase(songId);
+      if (!data?.star || authState.userId == null) return;
+      starApiRef.current?.({
+        userId: authState.userId,
+        nickname: authState.nickname ?? "나",
+        ...data.star,
       });
-      try {
-        const res = await fetch("/api/likes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ songId, liked }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as {
-          likesCount: number;
-          star: { x: number; y: number; z: number } | null;
-          starBorn: boolean;
-        };
-        setAuthState((prev) => ({ ...prev, likesCount: data.likesCount, star: data.star }));
-        if (data.star && authState.userId != null) {
-          starApiRef.current?.({
-            userId: authState.userId,
-            nickname: authState.nickname ?? "나",
-            ...data.star,
-          });
-          if (data.starBorn) {
-            setToast("🌟 내 별이 태어났어요!");
-            const s = data.star;
-            setTimeout(() => flyToPosRef.current?.(s.x, s.y, s.z, 120), 400);
-            setTimeout(() => setToast(null), 4500);
-          }
-        }
-      } catch {
-        // 실패 시 낙관적 반영 롤백
-        setAuthState((prev) => {
-          const next = new Set(prev.likedIds);
-          if (liked) next.delete(songId);
-          else next.add(songId);
-          return { ...prev, likedIds: next };
-        });
+      if (data.starBorn) {
+        setToast("🌟 내 별이 태어났어요!");
+        const s = data.star;
+        setTimeout(() => flyToPosRef.current?.(s.x, s.y, s.z, 120), 400);
+        setTimeout(() => setToast(null), 4500);
       }
     },
-    [authState],
+    [toggleLikeBase, authState.userId, authState.nickname],
   );
 
   // 카드가 열리면 첫 배치 보강
@@ -2462,10 +2400,17 @@ export default function GalaxyCanvas({
               {cards.songs.map((song) => {
                 const m = media[song.id];
                 const isPlaying = playingId === song.id && !isPaused;
+                // 재생 중인 곡은 살짝 키워 눈에 띄게 한다.
+                // 폭(w-40)은 그대로 두고 transform만 쓴다 — 가운데 정렬 계산이 흔들리지 않게
+                const isCurrent = playingId === song.id;
                 return (
                   <div
                     key={song.id}
-                    className={`relative w-40 shrink-0 snap-start overflow-hidden rounded-xl border ${focusedCardId === song.id ? "border-white/30" : "border-white/10"} bg-white/5 text-left backdrop-blur transition hover:border-white/30 hover:bg-white/10`}
+                    className={`relative w-40 shrink-0 snap-start overflow-hidden rounded-xl border bg-white/5 text-left backdrop-blur transition duration-200 hover:bg-white/10 ${
+                      isCurrent
+                        ? "z-10 scale-110 border-amber-200/50 shadow-lg shadow-amber-200/10"
+                        : `hover:border-white/30 ${focusedCardId === song.id ? "border-white/30" : "border-white/10"}`
+                    }`}
                   >
                     {/* 카드 클릭 → 곡 상세 페이지 */}
                     <Link href={`/songs/${song.id}`} className="block" aria-label={`${song.title} 상세 보기`}>
