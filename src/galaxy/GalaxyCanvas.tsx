@@ -259,7 +259,6 @@ export default function GalaxyCanvas({
     });
   }, []);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [songCount, setSongCount] = useState(0);
 
   /** 카드 스크롤 시 화면에 들어온 카드들을 보강 */
   const onCardScroll = useCallback(() => {
@@ -1609,7 +1608,6 @@ export default function GalaxyCanvas({
         if (disposed) return;
         payload = data;
         const n = data.songs.id.length;
-        setSongCount(n);
         positions = new Float32Array(data.songs.pos);
         songIndexById = new Map(data.songs.id.map((id, i) => [id, i]));
         const colors = new Float32Array(n * 3);
@@ -1950,7 +1948,7 @@ export default function GalaxyCanvas({
         <div className="pointer-events-none absolute left-4 top-4 max-w-[38%] text-white/90 sm:max-w-none">
           <h1 className="text-lg font-semibold tracking-wide">songGalaxy</h1>
           {status === "ready" && (
-            <p className="text-xs text-white/50">{songCount.toLocaleString()}곡이 떠 있는 은하 · 장르를 클릭해 들어가보세요</p>
+            <p className="text-xs text-white/50">장르를 클릭해 들어가보세요</p>
           )}
           {status === "ready" && authState.authenticated && authState.likesCount < MIN_LIKES_FOR_STAR && (
             <p className="mt-1 text-xs text-amber-200/90">
@@ -2442,7 +2440,6 @@ export default function GalaxyCanvas({
                       <div className="p-2.5 pb-8">
                         <p className="truncate text-sm font-medium text-white">{song.title}</p>
                         <p className="truncate text-xs text-white/50">{song.artist}</p>
-                        <p className="mt-0.5 text-[10px] text-white/35">인기도 {song.popularity}</p>
                       </div>
                     </Link>
                     <div className="absolute bottom-2 right-2 flex gap-1.5">

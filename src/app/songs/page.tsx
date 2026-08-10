@@ -228,7 +228,6 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
                 <span className="shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/40">
                   {song.genre}
                 </span>
-                <span className="w-10 shrink-0 text-right text-xs text-white/40">{song.popularity}</span>
               </Link>
             </li>
           ))}

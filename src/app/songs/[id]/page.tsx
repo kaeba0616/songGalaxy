@@ -114,8 +114,7 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
               <span className="mr-2 rounded-full border border-white/15 px-2.5 py-0.5" style={{ color: themeColor }}>
                 {song.genre}
               </span>
-              인기도 {song.popularity}
-              {song.album && <span className="ml-2 text-white/35">· {song.album}</span>}
+              {song.album && <span className="text-white/35">{song.album}</span>}
             </p>
           </div>
         </div>
