@@ -5,6 +5,7 @@ import { GENRE_CLUSTERS } from "@/config/genre-clusters";
 import { searchExternal } from "@/server/import-song";
 import { importSongAction } from "./actions";
 import ImportButton from "./ImportButton";
+import SongFilters from "./SongFilters";
 
 export const dynamic = "force-dynamic";
 
@@ -134,52 +135,12 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
           </Link>
         </div>
 
-        {/* 검색 + 필터 (GET 폼 — 새로고침/공유 가능한 URL) */}
-        <form className="mb-5 flex flex-wrap gap-2" action="/songs" method="GET">
-          <input
-            type="search"
-            name="q"
-            defaultValue={q}
-            placeholder="곡 제목이나 가수 검색"
-            className="min-w-48 flex-1 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm placeholder:text-white/30 focus:border-white/40 focus:outline-none"
-          />
-          <select
-            name="field"
-            defaultValue={field}
-            className="rounded-full border border-white/15 bg-[#0d0f1e] px-3 py-2 text-sm"
-          >
-            <option value="">제목+가수</option>
-            <option value="title">제목만</option>
-            <option value="artist">가수만</option>
-          </select>
-          <select
-            name="cluster"
-            defaultValue={cluster?.slug ?? ""}
-            className="rounded-full border border-white/15 bg-[#0d0f1e] px-3 py-2 text-sm"
-          >
-            <option value="">모든 성단</option>
-            {GENRE_CLUSTERS.map((c) => (
-              <option key={c.slug} value={c.slug}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-          <select
-            name="sort"
-            defaultValue={sort}
-            className="rounded-full border border-white/15 bg-[#0d0f1e] px-3 py-2 text-sm"
-          >
-            <option value="popularity">인기순</option>
-            <option value="recent">최신순</option>
-            <option value="title">제목순</option>
-          </select>
-          <button
-            type="submit"
-            className="rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm transition hover:bg-white/20"
-          >
-            검색
-          </button>
-        </form>
+        {/* 검색 + 필터 — URL에 조건이 남는 건 그대로, 이동만 클라이언트로.
+            일반 GET 폼이면 문서를 새로 열어 듣던 노래가 꺼진다 */}
+        <SongFilters
+          current={{ q, field, cluster: cluster?.slug ?? "", genre, sort }}
+          clusters={GENRE_CLUSTERS.map((c) => ({ slug: c.slug, label: c.label }))}
+        />
 
         {/* 성단 선택 시 세부 장르 칩 */}
         {cluster && (
