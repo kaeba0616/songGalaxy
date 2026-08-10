@@ -138,7 +138,11 @@ export default function GalaxyCanvas({
   const landByUserRef = useRef<((userId: number) => void) | null>(null);
   /** 별 더블클릭 → 해당 곡 미리듣기 재생 요청 (three 이벤트 → React) */
   const playRequestRef = useRef<
-    ((songId: number, info?: { title: string; artist: string }) => void) | null
+    | ((
+        songId: number,
+        info?: { title: string; artist: string; index: number; popularity: number },
+      ) => void)
+    | null
   >(null);
   const flySongRef = useRef<((index: number) => void) | null>(null);
   /** three 이벤트 콜백에서 최신 상태를 읽기 위한 미러 (stale closure 방지) */
@@ -165,6 +169,7 @@ export default function GalaxyCanvas({
   const {
     playingId,
     isPaused,
+    queue,
     volume,
     media,
     fetchMedia,
@@ -296,11 +301,30 @@ export default function GalaxyCanvas({
     });
   }, []);
 
-  /** 카드 목록을 전역 플레이어의 큐 형태로 변환 (재생 목록의 원본은 항상 이 카드 목록) */
+  /** 카드 목록 → 전역 플레이어 큐. 은하로 돌아왔을 때 되살릴 수 있게 통째로 넘긴다 */
   const toQueue = useCallback(
     (cardData: CardData): PlayerQueue => ({
       title: cardData.title,
-      songs: cardData.songs.map((s) => ({ id: s.id, title: s.title, artist: s.artist })),
+      subtitle: cardData.subtitle,
+      color: cardData.color,
+      songs: cardData.songs,
+    }),
+    [],
+  );
+
+  /** 전역 큐 → 카드 목록 (은하 복귀 시 재생 중인 목록을 캐러셀로 되살린다) */
+  const toCards = useCallback(
+    (q: PlayerQueue): CardData => ({
+      title: q.title,
+      subtitle: q.subtitle ?? `${q.songs.length}곡`,
+      color: q.color ?? "#ffdf9e",
+      songs: q.songs.map((s) => ({
+        index: s.index ?? -1,
+        id: s.id,
+        title: s.title,
+        artist: s.artist,
+        popularity: s.popularity ?? 0,
+      })),
     }),
     [],
   );
@@ -343,7 +367,18 @@ export default function GalaxyCanvas({
       // 열린 목록에 없는 곡(은하에서 직접 찍은 별)은 그 곡 하나짜리 큐로 재생
       const queue: PlayerQueue = cardData?.songs.some((s) => s.id === songId)
         ? toQueue(cardData)
-        : { title: info?.title ?? "재생 중", songs: [{ id: songId, ...(info ?? { title: "재생 중", artist: "" }) }] };
+        : {
+            title: info?.title ?? "재생 중",
+            songs: [
+              {
+                id: songId,
+                title: info?.title ?? "재생 중",
+                artist: info?.artist ?? "",
+                index: info?.index,
+                popularity: info?.popularity,
+              },
+            ],
+          };
       try {
         await playFrom(queue, songId);
       } catch {
@@ -398,12 +433,39 @@ export default function GalaxyCanvas({
     return () => setUiHosted(false);
   }, [cards, setUiHosted]);
 
-  // 재생 곡이 바뀌면 그 카드를 가운데로 (플레이어가 자동 진행한 경우 포함)
+  // 재생 곡이 바뀌거나 목록이 새로 열리면 그 카드를 가운데로
+  // (플레이어가 자동 진행한 경우, 은하 복귀로 목록이 되살아난 경우 포함)
   useEffect(() => {
-    if (playingId === null) return;
-    const i = cardsRef.current?.songs.findIndex((s) => s.id === playingId) ?? -1;
-    if (i >= 0) scrollToCard(i);
-  }, [playingId, scrollToCard]);
+    if (playingId === null || !cards) return;
+    const i = cards.songs.findIndex((s) => s.id === playingId);
+    if (i < 0) return;
+    // 목록이 막 그려진 직후라면 DOM이 준비될 때까지 한 틱 기다린다
+    const t = setTimeout(() => scrollToCard(i), 60);
+    return () => clearTimeout(t);
+  }, [playingId, cards, scrollToCard]);
+
+  /** 이펙트에서 최신 재생 상태를 읽기 위한 미러 (아래 복원 이펙트보다 먼저 선언해야 한다) */
+  const playingMirror = useRef<{ queue: PlayerQueue | null; playingId: number | null }>({
+    queue: null,
+    playingId: null,
+  });
+  useEffect(() => {
+    playingMirror.current = { queue, playingId };
+  }, [queue, playingId]);
+
+  /**
+   * 은하 화면에 들어온 순간, 재생 중인 목록을 카드 캐러셀로 되살린다.
+   * (다른 페이지에서 돌아왔을 때 알약 대신 캐러셀로 보여주기 위함)
+   * 진입당 한 번만 — 그러지 않으면 사용자가 ✕로 닫는 즉시 다시 열려버린다.
+   */
+  const cardsRestored = useRef(false);
+  useEffect(() => {
+    if (status !== "ready" || cardsRestored.current) return;
+    cardsRestored.current = true;
+    const { queue: q, playingId: pid } = playingMirror.current;
+    if (!q || pid === null) return;
+    setCards(toCards(q));
+  }, [status, toCards]);
 
   /**
    * 행성 착륙 전 은하에서 듣던 곡 — 은하로 나올 때 이 곡을 그 위치부터 이어 듣는다.
@@ -415,6 +477,10 @@ export default function GalaxyCanvas({
   useEffect(() => {
     playerApiRef.current = { snapshot, restore, stop: stopPlayer };
   }, [snapshot, restore, stopPlayer]);
+  const toCardsRef = useRef(toCards);
+  useEffect(() => {
+    toCardsRef.current = toCards;
+  }, [toCards]);
 
   // 로그인·좋아요·내 별 상태 로드 (클라이언트 상태의 단일 출처: /api/likes)
   useEffect(() => {
@@ -1331,12 +1397,17 @@ export default function GalaxyCanvas({
       controls.minPolarAngle = 0;
       controls.maxPolarAngle = Math.PI;
       setSkyInfo(null);
-      setCards(null);
-      // 행성 라디오를 끄고, 착륙 전 은하에서 듣던 곡을 그 위치부터 이어 재생
+      // 행성 라디오를 끄고, 착륙 전 은하에서 듣던 곡을 그 위치부터 이어 재생.
+      // 듣던 목록은 카드 캐러셀로 되살려 그대로 이어 들을 수 있게 한다
       const snap = galaxySnapshot.current;
       galaxySnapshot.current = null;
-      if (snap) void playerApiRef.current.restore(snap);
-      else playerApiRef.current.stop();
+      if (snap) {
+        void playerApiRef.current.restore(snap);
+        setCards(snap.queue ? toCardsRef.current(snap.queue) : null);
+      } else {
+        playerApiRef.current.stop();
+        setCards(null);
+      }
       flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
     exitSkyRef.current = exitSky;
@@ -1504,6 +1575,8 @@ export default function GalaxyCanvas({
           playRequestRef.current?.(payload.songs.id[si], {
             title: payload.songs.title[si],
             artist: payload.songs.artist[si],
+            index: si,
+            popularity: payload.songs.popularity[si],
           });
         }
         return;
@@ -1522,6 +1595,8 @@ export default function GalaxyCanvas({
         playRequestRef.current?.(payload.songs.id[hit.index], {
           title: payload.songs.title[hit.index],
           artist: payload.songs.artist[hit.index],
+          index: hit.index,
+          popularity: payload.songs.popularity[hit.index],
         });
         if (positions) {
           // 곡 제목 라벨이 또렷이 보이는 거리까지 확대
@@ -2412,15 +2487,17 @@ export default function GalaxyCanvas({
                       >
                         {authState.likedIds.has(song.id) ? "♥" : "♡"}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => flySongRef.current?.(song.index)}
-                        className="grid h-7 w-7 place-items-center rounded-full border border-white/20 bg-white/10 text-xs text-white/70 transition hover:bg-white/20"
-                        aria-label={`${song.title} 별로 이동`}
-                        title="은하에서 이 별로 이동"
-                      >
-                        ✦
-                      </button>
+                      {song.index >= 0 && (
+                        <button
+                          type="button"
+                          onClick={() => flySongRef.current?.(song.index)}
+                          className="grid h-7 w-7 place-items-center rounded-full border border-white/20 bg-white/10 text-xs text-white/70 transition hover:bg-white/20"
+                          aria-label={`${song.title} 별로 이동`}
+                          title="은하에서 이 별로 이동"
+                        >
+                          ✦
+                        </button>
+                      )}
                       {m?.previewUrl && (
                         <button
                           type="button"

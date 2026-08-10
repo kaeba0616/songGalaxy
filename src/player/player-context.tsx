@@ -28,11 +28,20 @@ export interface PlayerSong {
   id: number;
   title: string;
   artist: string;
+  /** 은하 페이로드에서의 곡 인덱스 — 카드 목록 복원·별로 이동에 쓴다 */
+  index?: number;
+  popularity?: number;
 }
 
-/** 재생 목록 — 은하 카드 목록·행성 라디오가 이 형태로 큐를 넘긴다 */
+/**
+ * 재생 목록 — 은하 카드 목록·행성 라디오가 이 형태로 큐를 넘긴다.
+ * 은하로 돌아왔을 때 이 큐만으로 카드 캐러셀을 되살릴 수 있어야 하므로
+ * 목록의 제목·부제·색까지 함께 들고 다닌다.
+ */
 export interface PlayerQueue {
   title: string;
+  subtitle?: string;
+  color?: string;
   songs: PlayerSong[];
 }
 
