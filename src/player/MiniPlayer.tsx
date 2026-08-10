@@ -57,7 +57,6 @@ export default function MiniPlayer() {
     playFrom,
     toggle,
     playStep,
-    stop,
     uiHosted,
   } = usePlayer();
   const { auth, toggleLike } = useLikes();
@@ -330,15 +329,6 @@ export default function MiniPlayer() {
             title={expanded ? "재생 목록 닫기" : "재생 목록 보기"}
           >
             ≡
-          </button>
-          <button
-            type="button"
-            onClick={stop}
-            className="cursor-pointer rounded-full px-1 text-white/50 transition hover:text-white"
-            aria-label="재생 종료"
-            title="재생 종료"
-          >
-            ✕
           </button>
         </div>
       </div>
