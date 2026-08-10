@@ -259,7 +259,7 @@ export default function MiniPlayer() {
         {/* 폭 고정 — 곡 제목 길이에 따라 알약 크기가 변하지 않게 한다.
             넘치는 글자는 Marquee가 흐르게 처리 */}
         {/* min-w-0: 없으면 긴 제목의 min-content 폭 때문에 알약이 화면 밖까지 밀린다 */}
-        <div className="w-28 min-w-0 shrink sm:w-44">
+        <div className="w-20 min-w-0 shrink sm:w-32">
           <Marquee text={song.title} className="text-sm font-medium" />
           <Marquee text={song.artist} className="text-xs text-white/50" />
         </div>
