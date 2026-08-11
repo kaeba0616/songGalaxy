@@ -18,6 +18,7 @@ import {
   useState,
 } from "react";
 import { ENRICH_BATCH } from "@/config/constants";
+import { pickEngine, type Engine } from "./engine";
 
 export interface Media {
   artworkUrl: string | null;
@@ -31,6 +32,8 @@ export interface PlayerSong {
   /** 은하 페이로드에서의 곡 인덱스 — 카드 목록 복원·별로 이동에 쓴다 */
   index?: number;
   popularity?: number;
+  /** 목록 재생에서 YouTube 전곡 재생에 쓴다. 없으면 미리듣기로 떨어진다 */
+  youtubeVideoId?: string | null;
 }
 
 /**
@@ -42,7 +45,18 @@ export interface PlayerQueue {
   title: string;
   subtitle?: string;
   color?: string;
+  /** playlist면 YouTube 전곡 재생을 시도한다. 없으면 browse(30초 미리듣기) */
+  mode?: "playlist" | "browse";
   songs: PlayerSong[];
+}
+
+/** YoutubeStage가 넘겨주는 제어 손잡이. 제어권은 Provider가 갖는다 */
+export interface YoutubeApi {
+  load(videoId: string): void;
+  play(): void;
+  pause(): void;
+  stop(): void;
+  setVolume(v0to1: number): void;
 }
 
 /** 행성 착륙 전 재생 상태 스냅샷 — 은하 복귀 시 이어듣기용 */
@@ -65,9 +79,17 @@ interface PlayerContextValue {
   getMedia: (id: number) => Media | undefined;
   /** 큐를 교체하고 해당 곡부터 재생. 미리듣기가 없거나 자동재생이 막히면 reject */
   playFrom: (queue: PlayerQueue, songId: number) => Promise<void>;
+  /** 지금 소리를 내고 있는 엔진 — 둘 중 하나만 켜진다 */
+  engine: Engine | null;
+  /** 영상 패널이 펼쳐져 있는지. 접으면 재생도 멈춘다 (약관: 영상은 보여야 한다) */
+  videoExpanded: boolean;
+  setVideoExpanded: (v: boolean) => void;
+  /** 목록 재생 시작 — YouTube 전곡 재생을 시도한다 */
+  playPlaylist: (queue: PlayerQueue, songId: number) => Promise<void>;
+  registerYoutube: (api: YoutubeApi | null) => void;
   /** 재생/일시정지 토글 (재생 중인 곡이 있을 때만 동작) */
   toggle: () => void;
-  /** 이전/다음 곡 — 미리듣기 없는 곡은 건너뜀, 끝↔처음 루프. newQueue를 주면 그 목록을 큐로 삼는다 */
+  /** 이전/다음 곡 — 재생할 수 없는 곡은 건너뜀, 끝↔처음 루프. newQueue를 주면 그 목록을 큐로 삼는다 */
   playStep: (dir: -1 | 1, newQueue?: PlayerQueue) => Promise<void>;
   /** 정지 + 큐 비움 */
   stop: () => void;
@@ -95,9 +117,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [playingId, setPlayingIdState] = useState<number | null>(null);
   const playingIdRef = useRef<number | null>(null);
   const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+  const setPaused = useCallback((v: boolean) => {
+    isPausedRef.current = v;
+    setIsPaused(v);
+  }, []);
   const [queue, setQueueState] = useState<PlayerQueue | null>(null);
   const queueRef = useRef<PlayerQueue | null>(null);
   const [uiHosted, setUiHosted] = useState(false);
+
+  const [engine, setEngineState] = useState<Engine | null>(null);
+  const engineRef = useRef<Engine | null>(null);
+  const [videoExpanded, setVideoExpandedState] = useState(false);
+  const ytRef = useRef<YoutubeApi | null>(null);
+
+  const setEngine = useCallback((e: Engine | null) => {
+    engineRef.current = e;
+    setEngineState(e);
+  }, []);
+
+  /** 지금 켜져 있지 않은 엔진을 확실히 끈다 — 두 곳에서 동시에 소리가 나면 안 된다 */
+  const silenceOther = useCallback((keep: Engine) => {
+    if (keep === "youtube") audioRef.current?.pause();
+    else ytRef.current?.stop();
+  }, []);
 
   const setPlayingId = useCallback((id: number | null) => {
     playingIdRef.current = id;
@@ -124,12 +167,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     volumeRef.current = v;
     if (v > 0) lastAudibleVolume.current = v;
     if (audioRef.current) audioRef.current.volume = v;
+    ytRef.current?.setVolume(v);
     localStorage.setItem("songgalaxy-volume", String(v));
   }, []);
 
   const toggleMute = useCallback(() => {
     changeVolume(volumeRef.current > 0 ? 0 : lastAudibleVolume.current);
   }, [changeVolume]);
+
+  // 볼륨 뒤에 둔다 — 등록 즉시 현재 볼륨을 맞춰야 첫 곡부터 소리 크기가 같다
+  const registerYoutube = useCallback((api: YoutubeApi | null) => {
+    ytRef.current = api;
+    if (api) api.setVolume(volumeRef.current);
+  }, []);
 
   // ── 미디어 캐시 (앨범아트/미리듣기 URL, /api/enrich) ─────────
   const [media, setMedia] = useState<Record<number, Media>>({});
@@ -162,19 +212,38 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const advanceRef = useRef<(afterId: number) => Promise<void>>(async () => {});
 
   const playSong = useCallback(
-    (songId: number, previewUrl: string): Promise<void> => {
-      if (!audioRef.current) {
-        audioRef.current = new Audio();
+    (song: PlayerSong, previewUrl: string | null, mode: "playlist" | "browse"): Promise<void> => {
+      const chosen = pickEngine({
+        mode,
+        youtubeVideoId: song.youtubeVideoId,
+        previewUrl,
+      });
+      if (!chosen) return Promise.reject(new Error("no-source"));
+
+      silenceOther(chosen);
+      setEngine(chosen);
+      setPlayingId(song.id);
+      setPaused(false);
+
+      if (chosen === "youtube") {
+        // 영상을 트려면 패널이 보여야 한다
+        setVideoExpandedState(true);
+        const yt = ytRef.current;
+        if (!yt) return Promise.reject(new Error("yt-not-ready"));
+        yt.setVolume(volumeRef.current);
+        yt.load(song.youtubeVideoId as string);
+        yt.play();
+        return Promise.resolve();
       }
+
+      if (!audioRef.current) audioRef.current = new Audio();
       const audio = audioRef.current;
       audio.volume = volumeRef.current;
-      audio.src = previewUrl;
-      audio.onended = () => void advanceRef.current(songId);
-      setPlayingId(songId);
-      setIsPaused(false);
+      audio.src = previewUrl as string;
+      audio.onended = () => void advanceRef.current(song.id);
       return audio.play();
     },
-    [setPlayingId],
+    [setEngine, setPaused, setPlayingId, silenceOther],
   );
 
   useEffect(() => {
@@ -189,24 +258,31 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setPlayingId(null);
         return;
       }
-      // 다음 곡부터 목록을 한 바퀴 돌며 미리듣기 있는 곡을 찾는다 — 끝나면 첫 곡으로 루프
+      // 다음 곡부터 목록을 한 바퀴 돌며 재생 가능한 곡을 찾는다 — 끝나면 첫 곡으로 루프
+      const mode = q.mode ?? "browse";
       const n = q.songs.length;
       for (let step = 1; step <= n; step++) {
         const i = (idx + step) % n;
         const song = q.songs[i];
         let m = mediaRef.current[song.id];
-        if (!m) {
+        // 목록 재생에서 영상 ID가 있으면 미리듣기를 볼 필요가 없다
+        if (!m && !(mode === "playlist" && song.youtubeVideoId)) {
           await fetchMedia(q.songs.slice(i, i + ENRICH_BATCH).map((s) => s.id));
           m = mediaRef.current[song.id];
         }
         // 대기 중 큐가 바뀌었으면 진행 중단
         if (queueRef.current !== q) return;
-        if (m?.previewUrl) {
-          playSong(song.id, m.previewUrl).catch(() => setPlayingId(null));
+        const usable = pickEngine({
+          mode,
+          youtubeVideoId: song.youtubeVideoId,
+          previewUrl: m?.previewUrl,
+        });
+        if (usable) {
+          playSong(song, m?.previewUrl ?? null, mode).catch(() => setPlayingId(null));
           return;
         }
       }
-      setPlayingId(null); // 미리듣기 가능한 곡이 하나도 없음
+      setPlayingId(null); // 재생 가능한 곡이 하나도 없음
     };
   }, [fetchMedia, playSong, setPlayingId]);
 
@@ -222,8 +298,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (!m?.previewUrl) {
         throw new Error("no-preview");
       }
+      // 은하 탐색은 언제나 미리듣기다 — 별을 누를 때마다 영상을 켜지 않는다
+      const song = q.songs.find((s) => s.id === songId) ?? { id: songId, title: "", artist: "" };
       try {
-        await playSong(songId, m.previewUrl);
+        await playSong(song, m.previewUrl, "browse");
       } catch (e) {
         setPlayingId(null);
         throw e;
@@ -233,16 +311,45 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const toggle = useCallback(() => {
+    if (playingIdRef.current === null) return;
+    if (engineRef.current === "youtube") {
+      const yt = ytRef.current;
+      if (!yt) return;
+      if (isPausedRef.current) {
+        setVideoExpandedState(true); // 접힌 채로 재생되면 안 된다
+        yt.play();
+        setPaused(false);
+      } else {
+        yt.pause();
+        setPaused(true);
+      }
+      return;
+    }
     const audio = audioRef.current;
-    if (playingIdRef.current === null || !audio || !audio.src) return;
+    if (!audio || !audio.src) return;
     if (audio.paused) {
-      setIsPaused(false);
+      setPaused(false);
       audio.play().catch(() => setPlayingId(null));
     } else {
       audio.pause();
-      setIsPaused(true);
+      setPaused(true);
     }
-  }, [setPlayingId]);
+  }, [setPaused, setPlayingId]);
+
+  /**
+   * 영상 패널 접기/펼치기.
+   * 접으면 반드시 멈춘다 — 영상을 숨긴 채 소리만 내는 것은 YouTube 약관 위반이다.
+   */
+  const setVideoExpanded = useCallback(
+    (v: boolean) => {
+      setVideoExpandedState(v);
+      if (!v && engineRef.current === "youtube") {
+        ytRef.current?.pause();
+        setPaused(true);
+      }
+    },
+    [setPaused],
+  );
 
   const playStep = useCallback(
     async (dir: -1 | 1, newQueue?: PlayerQueue): Promise<void> => {
@@ -256,12 +363,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const current = playingIdRef.current;
       const idx = current !== null ? q.songs.findIndex((s) => s.id === current) : -1;
       const start = idx < 0 ? (dir === 1 ? 0 : n - 1) : (((idx + dir) % n) + n) % n;
-      // 목록을 순환하며 미리듣기 있는 곡을 찾는다 (끝↔처음 루프)
+      // 목록을 순환하며 재생 가능한 곡을 찾는다 (끝↔처음 루프)
+      const mode = q.mode ?? "browse";
       for (let step = 0; step < n; step++) {
         const i = (((start + dir * step) % n) + n) % n;
         const song = q.songs[i];
         let m = mediaRef.current[song.id];
-        if (!m) {
+        // 목록 재생에서 영상 ID가 있으면 미리듣기를 볼 필요가 없다
+        if (!m && !(mode === "playlist" && song.youtubeVideoId)) {
           const batch =
             dir === 1
               ? q.songs.slice(i, i + ENRICH_BATCH)
@@ -271,8 +380,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         // 대기 중 큐가 바뀌었으면 진행 중단
         if (queueRef.current !== q) return;
-        if (m?.previewUrl) {
-          playSong(song.id, m.previewUrl).catch(() => setPlayingId(null));
+        const usable = pickEngine({
+          mode,
+          youtubeVideoId: song.youtubeVideoId,
+          previewUrl: m?.previewUrl,
+        });
+        if (usable) {
+          playSong(song, m?.previewUrl ?? null, mode).catch(() => setPlayingId(null));
           return;
         }
       }
@@ -282,31 +396,63 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const stop = useCallback(() => {
     audioRef.current?.pause();
+    ytRef.current?.stop();
+    setEngine(null);
+    setVideoExpandedState(false);
     setPlayingId(null);
-    setIsPaused(false);
+    setPaused(false);
     queueRef.current = null;
     setQueueState(null);
-  }, [setPlayingId]);
+  }, [setEngine, setPaused, setPlayingId]);
+
+  /** 목록 재생 시작 — 큐에 mode: "playlist"를 박아 YouTube 전곡 재생을 시도한다 */
+  const playPlaylist = useCallback(
+    async (q: PlayerQueue, songId: number): Promise<void> => {
+      const withMode: PlayerQueue = { ...q, mode: "playlist" };
+      queueRef.current = withMode;
+      setQueueState(withMode);
+      const song = withMode.songs.find((s) => s.id === songId);
+      if (!song) throw new Error("곡이 목록에 없습니다");
+      let m = mediaRef.current[songId];
+      if (!m && !song.youtubeVideoId) {
+        await fetchMedia([songId]);
+        m = mediaRef.current[songId];
+      }
+      await playSong(song, m?.previewUrl ?? null, "playlist");
+    },
+    [fetchMedia, playSong],
+  );
 
   const snapshot = useCallback((): PlayerSnapshot | null => {
     const audio = audioRef.current;
     const id = playingIdRef.current;
     if (id === null || !audio) return null;
-    return { queue: queueRef.current, songId: id, time: audio.currentTime };
+    // 위치는 미리듣기 엔진의 것만 의미가 있다 — 영상 재생 중이면 남아 있는 옛 위치를 쓰지 않는다
+    return {
+      queue: queueRef.current,
+      songId: id,
+      time: engineRef.current === "preview" ? audio.currentTime : 0,
+    };
   }, []);
 
   const restore = useCallback(
     async (snap: PlayerSnapshot): Promise<void> => {
       queueRef.current = snap.queue;
       setQueueState(snap.queue);
+      const mode = snap.queue?.mode ?? "browse";
+      // 스냅샷은 곡 id만 들고 있다 — 큐에서 곡을 되찾아야 영상 ID까지 살아난다
+      const song = snap.queue?.songs.find((s) => s.id === snap.songId) ?? {
+        id: snap.songId,
+        title: "",
+        artist: "",
+      };
       const m = mediaRef.current[snap.songId];
-      if (!m?.previewUrl) {
-        setPlayingId(null);
-        return;
-      }
       try {
-        await playSong(snap.songId, m.previewUrl);
-        if (audioRef.current) audioRef.current.currentTime = snap.time;
+        await playSong(song, m?.previewUrl ?? null, mode);
+        // 이어듣기 위치는 미리듣기에서만 되돌린다
+        if (engineRef.current === "preview" && audioRef.current) {
+          audioRef.current.currentTime = snap.time;
+        }
       } catch {
         setPlayingId(null);
       }
@@ -333,6 +479,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       restore,
       uiHosted,
       setUiHosted,
+      engine,
+      videoExpanded,
+      setVideoExpanded,
+      playPlaylist,
+      registerYoutube,
     }),
     [
       playingId,
@@ -351,6 +502,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       snapshot,
       restore,
       uiHosted,
+      engine,
+      videoExpanded,
+      setVideoExpanded,
+      playPlaylist,
+      registerYoutube,
     ],
   );
 
