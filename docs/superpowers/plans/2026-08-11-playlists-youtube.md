@@ -325,7 +325,7 @@ git commit -m "feat: 노래 목록 스키마 + 공유 slug·엔진 선택 유틸
 `src/server/playlists.ts`:
 
 ```ts
-import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { generateShareSlug } from "@/lib/share-slug";
 
@@ -427,7 +427,7 @@ export async function deletePlaylist(userId: number, id: number): Promise<boolea
     .returning({ id: schema.playlists.id });
   if (r.length === 0) return false;
   // 목록이 사라지면 담긴 곡 행도 의미가 없다 (FK 제약을 두지 않았으므로 직접 지운다)
-  await db.delete(schema.playlistSongs).where(inArray(schema.playlistSongs.playlistId, [id]));
+  await db.delete(schema.playlistSongs).where(eq(schema.playlistSongs.playlistId, id));
   return true;
 }
 ```
@@ -848,12 +848,10 @@ export default function YoutubeStage({
   register,
   onEnded,
   onError,
-  volume,
 }: {
   register: (api: YoutubeApi | null) => void;
   onEnded: () => void;
   onError: () => void;
-  volume: number;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   // 콜백을 ref로 잡아둔다 — 플레이어를 다시 만들지 않고 최신 핸들러를 부르기 위해
@@ -897,9 +895,8 @@ export default function YoutubeStage({
     };
   }, [register]);
 
-  useEffect(() => {
-    // 볼륨은 별도 이펙트로 — 플레이어를 다시 만들지 않는다
-  }, [volume]);
+  // 볼륨은 이 컴포넌트가 관리하지 않는다 — PlayerProvider의 changeVolume이
+  // registerYoutube로 받은 손잡이에 직접 setVolume을 건다 (단일 원본).
 
   return <div ref={hostRef} className="h-full w-full" />;
 }
@@ -1329,7 +1326,6 @@ export default function AddToPlaylist({
               register={registerYoutube}
               onEnded={() => void playStep(1)}
               onError={() => void playStep(1)}
-              volume={volume}
             />
           </div>
           <button
