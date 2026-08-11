@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getSessionUser } from "@/auth";
 import DataCredits from "@/components/DataCredits";
@@ -5,6 +6,9 @@ import { listMyPlaylists } from "@/server/playlists";
 import PlaylistManager from "./PlaylistManager";
 
 export const dynamic = "force-dynamic";
+
+/** 로그인한 사람의 개인 화면이다 — 검색엔진에 올리지 않는다 */
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 export default async function ListsPage() {
   const user = await getSessionUser();

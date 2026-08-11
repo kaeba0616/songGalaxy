@@ -1,11 +1,15 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSessionUser } from "@/auth";
 import DataCredits from "@/components/DataCredits";
 import PlaylistPlayButton from "@/components/PlaylistPlayButton";
-import { getPlaylistById } from "@/server/playlists";
+import { getPlaylistById, retryMissingVideos } from "@/server/playlists";
 
 export const dynamic = "force-dynamic";
+
+/** 남의 눈에 띌 이유가 없는 개인 화면이다 — 검색엔진에 올리지 않는다 */
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 /**
  * getPlaylistById는 user id를 받지 않고 소유권도 검사하지 않는다 — 남의(비공개)
@@ -19,8 +23,13 @@ export default async function PlaylistDetailPage(props: {
   const id = Number((await props.params).id);
   if (!Number.isInteger(id)) notFound();
   const user = await getSessionUser();
-  const pl = await getPlaylistById(id);
-  if (!pl || !user || pl.ownerId !== user.id) notFound();
+  const found0 = await getPlaylistById(id);
+  if (!found0 || !user || found0.ownerId !== user.id) notFound();
+
+  // 담을 때 쿼터가 말라 영상을 못 찾은 곡을 여기서 몇 개만 보충 조회한다.
+  // 소유자 화면에서만 — 공유 열람 화면에 걸면 크롤러 한 번에 하루 쿼터가 날아간다
+  const refilled = await retryMissingVideos(user.id, id);
+  const pl = refilled > 0 ? ((await getPlaylistById(id)) ?? found0) : found0;
 
   return (
     <main className="min-h-dvh bg-[#05060f] px-5 py-8 text-white">

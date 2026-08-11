@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import DataCredits from "@/components/DataCredits";
@@ -5,6 +6,12 @@ import PlaylistPlayButton from "@/components/PlaylistPlayButton";
 import { getPlaylistBySlug } from "@/server/playlists";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * slug를 아는 사람에게만 보이라고 만든 링크다 — 색인되면 "아는 사람만"이 무너지고,
+ * 크롤러가 목록의 곡 상세를 줄줄이 따라 들어가며 외부 API 호출까지 태운다.
+ */
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 /**
  * 공유 링크 열람 — slug를 아는 누구나 볼 수 있다(로그인 불필요).

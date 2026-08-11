@@ -17,7 +17,12 @@ import {
   useRef,
   useState,
 } from "react";
-import { ENRICH_BATCH, YT_STAGE_READY_TIMEOUT_MS } from "@/config/constants";
+import {
+  ENRICH_BATCH,
+  YT_ERROR_LIMIT,
+  YT_ERROR_WINDOW_MS,
+  YT_STAGE_READY_TIMEOUT_MS,
+} from "@/config/constants";
 import { pickEngine, type Engine } from "./engine";
 
 export interface Media {
@@ -48,6 +53,21 @@ export interface PlayerQueue {
   /** playlist면 YouTube 전곡 재생을 시도한다. 없으면 browse(30초 미리듣기) */
   mode?: "playlist" | "browse";
   songs: PlayerSong[];
+}
+
+/**
+ * 무대가 알려오는 실패 원인.
+ * - `api`: IFrame 스크립트 자체를 못 읽음 (영상 ID 문제가 아니다)
+ * - `embed-refused`: 권리자가 임베드를 막았거나 없어진 영상 (그 ID는 앞으로도 못 쓴다)
+ * - `playback`: 일시적/기타 재생 오류 (ID는 멀쩡할 수 있다)
+ * YouTube 오류 코드를 이 세 갈래로 옮기는 일은 무대가 한다 — Provider는 코드 번호를 모른다.
+ */
+export type YoutubeErrorReason = "api" | "embed-refused" | "playback";
+
+/** 큐에서 찾아낸 "지금 재생할 수 있는 곡" */
+interface Playable {
+  song: PlayerSong;
+  previewUrl: string | null;
 }
 
 /** YoutubeStage가 넘겨주는 제어 손잡이. 제어권은 Provider가 갖는다 */
@@ -94,6 +114,8 @@ interface PlayerContextValue {
   getMedia: (id: number) => Media | undefined;
   /** 큐를 교체하고 해당 곡부터 재생. 미리듣기가 없거나 자동재생이 막히면 reject */
   playFrom: (queue: PlayerQueue, songId: number) => Promise<void>;
+  /** 이미 듣고 있는 큐 안에서 곡을 골라 재생 — 그 큐의 mode(목록/탐색)를 그대로 지킨다 */
+  playInQueue: (queue: PlayerQueue, songId: number) => Promise<void>;
   /** 지금 소리를 내고 있는 엔진 — 둘 중 하나만 켜진다 */
   engine: Engine | null;
   /** 영상 패널이 펼쳐져 있는지. 접으면 재생도 멈춘다 (약관: 영상은 보여야 한다) */
@@ -102,6 +124,10 @@ interface PlayerContextValue {
   /** 목록 재생 시작 — YouTube 전곡 재생을 시도한다 */
   playPlaylist: (queue: PlayerQueue, songId: number) => Promise<void>;
   registerYoutube: (api: YoutubeApi | null) => void;
+  /** 무대가 영상을 못 틀었다 — 그 곡만 미리듣기로 떨어뜨린다 (폭주하면 목록 전체를 미리듣기로) */
+  reportYoutubeError: (reason: YoutubeErrorReason) => void;
+  /** 재생 방식이 바뀐 이유를 사용자에게 한 줄로 알린다 (영상 실패 폴백 등). 없으면 null */
+  notice: string | null;
   /** 재생/일시정지 토글 (재생 중인 곡이 있을 때만 동작) */
   toggle: () => void;
   /** 이전/다음 곡 — 재생할 수 없는 곡은 건너뜀, 끝↔처음 루프. newQueue를 주면 그 목록을 큐로 삼는다 */
@@ -147,6 +173,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const ytRef = useRef<YoutubeApi | null>(null);
   const pendingYtRef = useRef<PendingYoutube | null>(null);
   const pendingSeqRef = useRef(0);
+  const [notice, setNotice] = useState<string | null>(null);
+  /** 영상 오류 폭주 감지용 — 창(window) 시작 시각과 그 창에서 센 오류 수 */
+  const ytErrorsRef = useRef<{ since: number; count: number }>({ since: 0, count: 0 });
 
   const setEngine = useCallback((e: Engine | null) => {
     engineRef.current = e;
@@ -356,6 +385,45 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [clearIfStill, rejectPendingYt, setEngine, setPaused, setPlayingId, silenceOther, startYoutube],
   );
 
+  /**
+   * start 인덱스부터 dir 방향으로 큐를 한 바퀴 돌며 "지금 재생할 수 있는 첫 곡"을 찾는다.
+   *
+   * 자동 진행·이전/다음·목록 시작·영상 실패 폴백이 모두 이 한 곳을 쓴다. 경로마다 따로
+   * 판단하면 곡별 폴백 규칙(영상 없으면 미리듣기, 둘 다 없으면 건너뜀)이 어긋나
+   * "첫 곡 하나가 재생 불가면 목록 전체가 죽는" 식의 구멍이 생긴다.
+   * 미디어를 기다리는 사이 큐가 바뀌면 null — 호출부는 queueRef로 "없음"과 구분할 수 있다.
+   */
+  const findPlayable = useCallback(
+    async (q: PlayerQueue, start: number, dir: -1 | 1): Promise<Playable | null> => {
+      const mode = q.mode ?? "browse";
+      const n = q.songs.length;
+      for (let step = 0; step < n; step++) {
+        const i = (((start + dir * step) % n) + n) % n;
+        const song = q.songs[i];
+        let m = mediaRef.current[song.id];
+        // 목록 재생에서 영상 ID가 있으면 미리듣기를 볼 필요가 없다
+        if (!m && !(mode === "playlist" && song.youtubeVideoId)) {
+          const batch =
+            dir === 1
+              ? q.songs.slice(i, i + ENRICH_BATCH)
+              : q.songs.slice(Math.max(0, i - ENRICH_BATCH + 1), i + 1);
+          await fetchMedia(batch.map((s) => s.id));
+          m = mediaRef.current[song.id];
+        }
+        // 대기 중 큐가 바뀌었으면 진행 중단
+        if (queueRef.current !== q) return null;
+        const usable = pickEngine({
+          mode,
+          youtubeVideoId: song.youtubeVideoId,
+          previewUrl: m?.previewUrl,
+        });
+        if (usable) return { song, previewUrl: m?.previewUrl ?? null };
+      }
+      return null;
+    },
+    [fetchMedia],
+  );
+
   useEffect(() => {
     advanceRef.current = async (afterId: number) => {
       const q = queueRef.current;
@@ -368,33 +436,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setPlayingId(null);
         return;
       }
-      // 다음 곡부터 목록을 한 바퀴 돌며 재생 가능한 곡을 찾는다 — 끝나면 첫 곡으로 루프
-      const mode = q.mode ?? "browse";
-      const n = q.songs.length;
-      for (let step = 1; step <= n; step++) {
-        const i = (idx + step) % n;
-        const song = q.songs[i];
-        let m = mediaRef.current[song.id];
-        // 목록 재생에서 영상 ID가 있으면 미리듣기를 볼 필요가 없다
-        if (!m && !(mode === "playlist" && song.youtubeVideoId)) {
-          await fetchMedia(q.songs.slice(i, i + ENRICH_BATCH).map((s) => s.id));
-          m = mediaRef.current[song.id];
-        }
-        // 대기 중 큐가 바뀌었으면 진행 중단
-        if (queueRef.current !== q) return;
-        const usable = pickEngine({
-          mode,
-          youtubeVideoId: song.youtubeVideoId,
-          previewUrl: m?.previewUrl,
-        });
-        if (usable) {
-          playSong(song, m?.previewUrl ?? null, mode).catch(() => clearIfStill(song.id));
-          return;
-        }
+      // 다음 곡부터 한 바퀴 — 끝나면 첫 곡으로 루프 (findPlayable이 감싸 계산한다)
+      const hit = await findPlayable(q, idx + 1, 1);
+      if (!hit) {
+        if (queueRef.current === q) setPlayingId(null); // 재생 가능한 곡이 하나도 없음
+        return;
       }
-      setPlayingId(null); // 재생 가능한 곡이 하나도 없음
+      playSong(hit.song, hit.previewUrl, q.mode ?? "browse").catch(() => clearIfStill(hit.song.id));
     };
-  }, [clearIfStill, fetchMedia, playSong, setPlayingId]);
+  }, [clearIfStill, findPlayable, playSong, setPlayingId]);
 
   const playFrom = useCallback(
     async (q: PlayerQueue, songId: number): Promise<void> => {
@@ -409,6 +459,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         throw new Error("no-preview");
       }
       // 은하 탐색은 언제나 미리듣기다 — 별을 누를 때마다 영상을 켜지 않는다
+      setNotice(null); // 앞 목록의 안내가 탐색 재생까지 따라오지 않게
       const song = q.songs.find((s) => s.id === songId) ?? { id: songId, title: "", artist: "" };
       try {
         await playSong(song, m.previewUrl, "browse");
@@ -487,42 +538,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const n = q.songs.length;
       const current = playingIdRef.current;
       const idx = current !== null ? q.songs.findIndex((s) => s.id === current) : -1;
-      const start = idx < 0 ? (dir === 1 ? 0 : n - 1) : (((idx + dir) % n) + n) % n;
       // 목록을 순환하며 재생 가능한 곡을 찾는다 (끝↔처음 루프)
-      const mode = q.mode ?? "browse";
-      for (let step = 0; step < n; step++) {
-        const i = (((start + dir * step) % n) + n) % n;
-        const song = q.songs[i];
-        let m = mediaRef.current[song.id];
-        // 목록 재생에서 영상 ID가 있으면 미리듣기를 볼 필요가 없다
-        if (!m && !(mode === "playlist" && song.youtubeVideoId)) {
-          const batch =
-            dir === 1
-              ? q.songs.slice(i, i + ENRICH_BATCH)
-              : q.songs.slice(Math.max(0, i - ENRICH_BATCH + 1), i + 1);
-          await fetchMedia(batch.map((s) => s.id));
-          m = mediaRef.current[song.id];
-        }
-        // 대기 중 큐가 바뀌었으면 진행 중단
-        if (queueRef.current !== q) return;
-        const usable = pickEngine({
-          mode,
-          youtubeVideoId: song.youtubeVideoId,
-          previewUrl: m?.previewUrl,
-        });
-        if (usable) {
-          playSong(song, m?.previewUrl ?? null, mode).catch(() => clearIfStill(song.id));
-          return;
-        }
-      }
+      const start = idx < 0 ? (dir === 1 ? 0 : n - 1) : idx + dir;
+      const hit = await findPlayable(q, start, dir);
+      if (!hit) return;
+      playSong(hit.song, hit.previewUrl, q.mode ?? "browse").catch(() => clearIfStill(hit.song.id));
     },
-    [clearIfStill, fetchMedia, playSong],
+    [clearIfStill, findPlayable, playSong],
   );
 
   const stop = useCallback(() => {
     audioRef.current?.pause();
     ytRef.current?.stop();
     rejectPendingYt(new Error("stopped")); // 기다리던 요청이 정지 뒤에 되살아나면 안 된다
+    setNotice(null);
     setEngine(null);
     setVideoExpandedState(false);
     setPlayingId(null);
@@ -537,16 +566,100 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const withMode: PlayerQueue = { ...q, mode: "playlist" };
       queueRef.current = withMode;
       setQueueState(withMode);
-      const song = withMode.songs.find((s) => s.id === songId);
-      if (!song) throw new Error("곡이 목록에 없습니다");
-      let m = mediaRef.current[songId];
-      if (!m && !song.youtubeVideoId) {
-        await fetchMedia([songId]);
-        m = mediaRef.current[songId];
+      const idx = withMode.songs.findIndex((s) => s.id === songId);
+      if (idx < 0) throw new Error("곡이 목록에 없습니다");
+      // 새 목록이니 앞 목록에서 쌓인 오류 이력·안내는 지운다
+      ytErrorsRef.current = { since: 0, count: 0 };
+      setNotice(null);
+      // 시작 곡에 영상도 미리듣기도 없을 수 있다 — 거기서 멈추지 않고 뒤로 넘어가
+      // 재생 가능한 첫 곡을 찾는다. 한 곡 때문에 목록 전체가 죽으면 안 된다
+      const hit = await findPlayable(withMode, idx, 1);
+      if (!hit) {
+        // 기다리는 사이 다른 재생이 큐를 가져갔다면 실패가 아니다 (호출부가 삼키는 사유)
+        if (queueRef.current !== withMode) throw new Error("superseded");
+        throw new Error("no-source");
       }
-      await playSong(song, m?.previewUrl ?? null, "playlist");
+      await playSong(hit.song, hit.previewUrl, "playlist");
     },
-    [fetchMedia, playSong],
+    [findPlayable, playSong],
+  );
+
+  /**
+   * 이미 듣고 있는 큐 안에서 곡 고르기 (알약의 재생 목록 클릭).
+   * 큐가 들고 있는 mode를 그대로 지킨다 — 목록 재생 중에 browse로 떨어뜨리면
+   * 전곡 재생이 30초 미리듣기로 강등되고, 다음 곡부터 다시 영상으로 돌아와
+   * 곡마다 재생 방식이 널뛴다.
+   */
+  const playInQueue = useCallback(
+    (q: PlayerQueue, songId: number): Promise<void> =>
+      (q.mode ?? "browse") === "playlist" ? playPlaylist(q, songId) : playFrom(q, songId),
+    [playFrom, playPlaylist],
+  );
+
+  /**
+   * 무대가 영상을 못 틀었을 때의 수습 — 그 곡만 미리듣기로 떨어뜨린다.
+   *
+   * 곡을 통째로 건너뛰면(예전 동작) 임베드가 막힌 영상 하나 때문에 그 곡이 모든 목록에서
+   * 영영 재생되지 않는다. 그리고 오류 → 다음 곡 → 오류가 iframe 로드 속도로 이어지면
+   * 목록 전체가 몇 초 만에 타버리므로, 짧은 창 안에 오류가 쌓이면 이 목록은 통째로
+   * 미리듣기로 내리고 안내를 남긴다(설계의 "IFrame 실패 → 전체 미리듣기 + 안내 한 줄").
+   */
+  const reportYoutubeError = useCallback(
+    (reason: YoutubeErrorReason): void => {
+      void (async () => {
+        const id = playingIdRef.current;
+        if (id === null) return;
+        const q = queueRef.current;
+        const song = q?.songs.find((s) => s.id === id);
+        const badId = song?.youtubeVideoId ?? null;
+
+        // 임베드 거부·삭제된 영상만 서버 캐시에서 지운다. 검사 시각(youtube_checked_at)은
+        // 남기므로 다시 검색하지 않는다 — 재검색해봐야 같은 영상을 또 찾아오며 쿼터만 태운다.
+        // 스크립트 로드 실패("api")나 일시적 오류까지 지우면 멀쩡한 ID를 잃는다
+        if (badId && reason === "embed-refused") {
+          void fetch(`/api/songs/${id}/video`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ videoId: badId }),
+          }).catch(() => undefined);
+        }
+
+        const now = Date.now();
+        const e = ytErrorsRef.current;
+        if (now - e.since > YT_ERROR_WINDOW_MS) ytErrorsRef.current = { since: now, count: 0 };
+        ytErrorsRef.current.count += 1;
+        const giveUp = ytErrorsRef.current.count >= YT_ERROR_LIMIT;
+
+        // 큐에서도 죽은 영상 ID를 지운다 — 남겨두면 같은 영상을 계속 다시 시도한다
+        let next = q;
+        if (q && badId && reason !== "playback") {
+          next = {
+            ...q,
+            songs: q.songs.map((s) => (s.id === id ? { ...s, youtubeVideoId: null } : s)),
+          };
+        }
+        if (next && giveUp) next = { ...next, mode: "browse" };
+        if (next && next !== q) {
+          queueRef.current = next;
+          setQueueState(next);
+        }
+        setNotice(giveUp ? "영상을 틀 수 없어 30초 미리듣기로 이어 듣습니다" : null);
+
+        const cur = queueRef.current;
+        if (!cur) return;
+        const at = cur.songs.findIndex((s) => s.id === id);
+        // 같은 곡을 미리듣기로 다시, 미리듣기도 없으면 다음 곡으로 (findPlayable이 결정)
+        const hit = await findPlayable(cur, at < 0 ? 0 : at, 1);
+        if (!hit) {
+          clearIfStill(id);
+          return;
+        }
+        playSong(hit.song, hit.previewUrl, cur.mode ?? "browse").catch(() =>
+          clearIfStill(hit.song.id),
+        );
+      })();
+    },
+    [clearIfStill, findPlayable, playSong],
   );
 
   const snapshot = useCallback((): PlayerSnapshot | null => {
@@ -598,6 +711,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       fetchMedia,
       getMedia,
       playFrom,
+      playInQueue,
       toggle,
       playStep,
       stop,
@@ -612,6 +726,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setVideoExpanded,
       playPlaylist,
       registerYoutube,
+      reportYoutubeError,
+      notice,
     }),
     [
       playingId,
@@ -622,6 +738,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       fetchMedia,
       getMedia,
       playFrom,
+      playInQueue,
       toggle,
       playStep,
       stop,
@@ -635,6 +752,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setVideoExpanded,
       playPlaylist,
       registerYoutube,
+      reportYoutubeError,
+      notice,
     ],
   );
 

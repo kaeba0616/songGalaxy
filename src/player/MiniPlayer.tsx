@@ -57,7 +57,7 @@ export default function MiniPlayer() {
     changeVolume,
     toggleMute,
     fetchMedia,
-    playFrom,
+    playInQueue,
     toggle,
     playStep,
     uiHosted,
@@ -65,6 +65,8 @@ export default function MiniPlayer() {
     videoExpanded,
     setVideoExpanded,
     registerYoutube,
+    reportYoutubeError,
+    notice,
   } = usePlayer();
   const { auth, toggleLike } = useLikes();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -232,8 +234,10 @@ export default function MiniPlayer() {
                     type="button"
                     data-current={isCurrent}
                     onClick={() => {
+                      // playInQueue는 이 큐의 mode를 지킨다 — 목록 재생 중에 곡을 고르면
+                      // 30초 미리듣기로 강등되지 않고 그대로 영상으로 이어진다
                       if (isCurrent) toggle();
-                      else if (queue) void playFrom(queue, s.id).catch(() => undefined);
+                      else if (queue) void playInQueue(queue, s.id).catch(() => undefined);
                     }}
                     className={`flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left transition hover:bg-white/10 ${
                       isCurrent ? "bg-white/10" : ""
@@ -291,7 +295,9 @@ export default function MiniPlayer() {
               videoId={stageVideoId}
               register={registerYoutube}
               onEnded={() => void playStep(1)}
-              onError={() => void playStep(1)}
+              // 건너뛰지 않는다 — 임베드가 막힌 영상 하나로 그 곡을 모든 목록에서
+              // 영영 잃는다. Provider가 그 곡만 미리듣기로 떨어뜨린다
+              onError={reportYoutubeError}
             />
           </div>
           <button
@@ -316,6 +322,13 @@ export default function MiniPlayer() {
         >
           영상 펼치고 이어 듣기
         </button>
+      )}
+
+      {/* 재생 방식이 바뀐 이유 한 줄 — 영상이 계속 실패해 미리듣기로 내려온 경우 */}
+      {notice && (
+        <p className="mb-2 w-full rounded-2xl border border-amber-200/25 bg-black/80 px-3 py-1.5 text-center text-[11px] text-amber-100/80 backdrop-blur">
+          {notice}
+        </p>
       )}
 
       {/* 알약 본체 */}

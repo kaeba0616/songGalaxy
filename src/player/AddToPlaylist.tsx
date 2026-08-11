@@ -5,6 +5,7 @@
  * 목록이 하나도 없으면 그 자리에서 이름을 입력해 만든다 —
  * 목록을 만들러 다른 페이지로 보내면 담으려던 곡을 놓친다.
  */
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 interface Item {
@@ -190,6 +191,13 @@ export default function AddToPlaylist({
               담기
             </button>
           </div>
+          {/* 담은 뒤 목록을 열어 보는 길 — 여기서 만든 목록을 재생·공유하려면 /lists로 가야 한다 */}
+          <Link
+            href="/lists"
+            className="mt-2 block text-center text-xs text-white/45 underline transition hover:text-white"
+          >
+            내 노래 목록 관리
+          </Link>
         </>
       )}
     </div>

@@ -12,11 +12,20 @@
  * DOM에 남아 있지만(내리면 손잡이가 사라져 이어 들을 수 없다) 그때는 반드시 멈춘 상태다.
  */
 import { useEffect, useRef } from "react";
-import type { YoutubeApi } from "./player-context";
+import type { YoutubeApi, YoutubeErrorReason } from "./player-context";
 
 interface YT {
   Player: new (el: HTMLElement, opts: Record<string, unknown>) => YtPlayer;
   PlayerState: { ENDED: number };
+}
+
+/**
+ * YouTube 오류 코드 → Provider가 아는 갈래.
+ * 100(없는 영상)·101·150(임베드 거부)만 "그 ID는 앞으로도 못 쓴다"는 뜻이다.
+ * 2(잘못된 파라미터)·5(HTML5 플레이어 오류)는 ID가 멀쩡할 수 있으므로 캐시를 지우면 안 된다.
+ */
+function toReason(code: number): YoutubeErrorReason {
+  return code === 100 || code === 101 || code === 150 ? "embed-refused" : "playback";
 }
 interface YtPlayer {
   loadVideoById(id: string): void;
@@ -73,7 +82,8 @@ export default function YoutubeStage({
   videoId: string;
   register: (api: YoutubeApi | null) => void;
   onEnded: () => void;
-  onError: () => void;
+  /** 실패 원인을 함께 넘긴다 — 무엇을 지워도 되는지는 Provider가 이 갈래로 판단한다 */
+  onError: (reason: YoutubeErrorReason) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   // 만들 때의 영상 ID만 쓴다 — 곡이 바뀔 때마다 플레이어를 다시 만들면 재생이 끊긴다
@@ -122,11 +132,11 @@ export default function YoutubeStage({
             onStateChange: (e: { data: number }) => {
               if (e.data === YT.PlayerState.ENDED) endedRef.current();
             },
-            onError: () => errorRef.current(),
+            onError: (e: { data: number }) => errorRef.current(toReason(e.data)),
           },
         });
       })
-      .catch(() => errorRef.current());
+      .catch(() => errorRef.current("api"));
 
     return () => {
       cancelled = true;

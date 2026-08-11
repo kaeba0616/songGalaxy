@@ -49,6 +49,23 @@ export const PLACEMENT_NEIGHBORS = 8;
  */
 export const YT_STAGE_READY_TIMEOUT_MS = 10_000;
 
+/**
+ * 영상 오류 폭주 차단 — 이 창(ms) 안에 오류가 이만큼 쌓이면 목록 전체를 미리듣기로 내린다.
+ * 오류 → 다음 곡 → 오류가 iframe 로드 속도로 목록 전체를 태우는 것을 막는다.
+ */
+export const YT_ERROR_WINDOW_MS = 15_000;
+export const YT_ERROR_LIMIT = 3;
+
+/**
+ * 한 사용자가 하루(직전 24시간)에 태울 수 있는 YouTube 검색 횟수.
+ * 서비스 전체 무료 쿼터가 하루 100회(검색 1회 = 100유닛)라 한 사람이 다 쓰면
+ * 나머지 사용자 전원이 그날 영상을 못 찾는다.
+ */
+export const YOUTUBE_LOOKUPS_PER_USER_PER_DAY = 20;
+
+/** 목록 상세를 열 때 "아직 못 찾은 곡"을 다시 찾아보는 최대 곡 수 (한 번의 열람당) */
+export const YOUTUBE_LOOKUP_RETRY_MAX = 3;
+
 /** 행성 프로필 — 닉네임 최대 길이 */
 export const NICKNAME_MAX = 20;
 /** 행성 프로필 — 한 줄 소개 최대 길이 */
