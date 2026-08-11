@@ -87,6 +87,40 @@ const BY_ARTIST: Record<string, string> = {
   // 브라질
   "Reginaldo Rossi": "brazil",
   Strike: "brazil",
+
+  // ── 2차: k-pop·malay에 섞여 있던 인도 영화음악 ──────────────────────
+  // 데이터셋이 인도 재생가수·작곡가를 k-pop과 malay로 라벨링해 두었다.
+  // 제목에 (From "...")가 붙은 영화 삽입곡이 많아 pop-film으로 보낸다.
+  "Yuvan Shankar Raja": "pop-film",
+  "Alka Yagnik": "pop-film",
+  "Jubin Nautiyal": "pop-film",
+  "Anuradha Paudwal": "pop-film",
+  Ilaiyaraaja: "pop-film",
+  "Vijay Antony": "pop-film",
+  Vidyasagar: "pop-film",
+  Dhanush: "pop-film",
+  "Jagjit Singh": "pop-film",
+  "T. M. Soundararajan": "pop-film",
+  "Kamal Haasan": "pop-film",
+  Prem: "pop-film", // MusicBrainz는 DE라지만 곡이 펀자브어다
+  Sujatha: "pop-film",
+  "K. S. Harisankar": "pop-film",
+  "Najim Arshad": "pop-film",
+  "Gowry Lekshmi": "pop-film",
+  Manjari: "pop-film",
+  "Nikhil mathew": "pop-film",
+  "Ribin Richard": "pop-film",
+  NJ: "pop-film", // MusicBrainz는 KR이라지만 곡이 말라얄람어다
+
+  // ── 2차: german에 섞여 있던 영화음악 작곡가 ─────────────────────────
+  // 독일 태생이라는 이유로 독일 가요 장르에 들어갔지만 오케스트라 영화음악이다.
+  "Hans Zimmer": "classical",
+  "Klaus Badelt": "classical",
+  "Marc Streitenfeld": "classical",
+
+  // ── 2차: 그 밖에 명백한 것 ──────────────────────────────────────────
+  "Jack Harlow": "hip-hop",
+  "Michael Wong": "mandopop",
 };
 
 interface Target extends Record<string, unknown> {
@@ -114,13 +148,25 @@ async function targetsFor(rule: (typeof RULES)[number]): Promise<Target[]> {
   return rows.rows;
 }
 
-/** BY_ARTIST에 적힌 가수의, 아직 일본 장르에 남아 있는 곡들 */
-async function targetsForArtist(artist: string): Promise<Target[]> {
+/**
+ * 국적이 이름에 박힌 장르들 — 오분류가 생기는 곳이다.
+ * BY_ARTIST는 이 장르에 잘못 들어간 곡만 옮긴다. 가수가 정당하게 다른 장르에도
+ * 곡을 갖고 있다면 그건 건드리지 않는다.
+ */
+const NATION_GENRES = [
+  "j-pop", "j-rock", "j-idol", "j-dance",
+  "k-pop", "turkish", "french", "german", "swedish",
+  "spanish", "brazil", "indian", "iranian", "malay",
+];
+
+/** BY_ARTIST에 적힌 가수의, 아직 국적 장르에 남아 있는 곡들 */
+async function targetsForArtist(artist: string, to: string): Promise<Target[]> {
+  const from = NATION_GENRES.filter((g) => g !== to);
   const rows = await db.execute<Target>(sql`
     SELECT id, title, artist, genre, '' AS country
     FROM songs
     WHERE artist = ${artist}
-      AND genre IN ('j-pop', 'j-rock', 'j-idol', 'j-dance')
+      AND genre = ANY(${sql.raw(`ARRAY[${from.map((g) => `'${g}'`).join(",")}]`)})
     ORDER BY id`);
   return rows.rows;
 }
@@ -178,7 +224,7 @@ async function main(): Promise<void> {
   // 사람이 정한 가수별 매핑
   console.log("\n[가수별 지정]");
   for (const [artist, to] of Object.entries(BY_ARTIST)) {
-    const targets = await targetsForArtist(artist);
+    const targets = await targetsForArtist(artist, to);
     if (targets.length === 0) continue;
     console.log(`  ${artist} (${targets[0].genre}) → ${to}: ${targets.length}곡`);
     if (!APPLY) continue;
