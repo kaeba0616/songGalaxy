@@ -42,6 +42,13 @@ export const AUDIO_FEATURE_KEYS = [
 /** 신곡을 놓을 때 참고할 이웃 곡 수 (특징 공간 최근접) */
 export const PLACEMENT_NEIGHBORS = 8;
 
+/**
+ * YouTube 무대가 준비되기를 기다리는 한도(ms).
+ * IFrame API 스크립트를 내려받고 플레이어가 onReady를 알릴 때까지의 창을 덮는다 —
+ * 이 시간이 지나도 무대가 없으면 요청을 버리고 호출부에 실패를 알린다.
+ */
+export const YT_STAGE_READY_TIMEOUT_MS = 10_000;
+
 /** 행성 프로필 — 닉네임 최대 길이 */
 export const NICKNAME_MAX = 20;
 /** 행성 프로필 — 한 줄 소개 최대 길이 */

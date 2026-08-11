@@ -8,7 +8,8 @@
  * 마운트되면 registerYoutube로 제어 API를 넘기고, 언마운트되면 null로 지운다.
  *
  * 약관: 이 플레이어는 화면에 보여야 한다. 숨긴 채 소리만 내면 위반이므로
- * 호출부(MiniPlayer)가 "접기 = 일시정지"를 지킨다.
+ * 호출부(MiniPlayer)가 "접기 = 일시정지"를 지킨다. 접힌 동안에도 이 컴포넌트는
+ * DOM에 남아 있지만(내리면 손잡이가 사라져 이어 들을 수 없다) 그때는 반드시 멈춘 상태다.
  */
 import { useEffect, useRef } from "react";
 import type { YoutubeApi } from "./player-context";
@@ -63,15 +64,20 @@ function loadApi(): Promise<YT> {
 }
 
 export default function YoutubeStage({
+  videoId,
   register,
   onEnded,
   onError,
 }: {
+  /** 무대를 세울 때 iframe에 실을 영상. 이후 곡 전환은 Provider가 load()로 한다 */
+  videoId: string;
   register: (api: YoutubeApi | null) => void;
   onEnded: () => void;
   onError: () => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  // 만들 때의 영상 ID만 쓴다 — 곡이 바뀔 때마다 플레이어를 다시 만들면 재생이 끊긴다
+  const initialVideoId = useRef(videoId);
   // 콜백을 ref로 잡아둔다 — 플레이어를 다시 만들지 않고 최신 핸들러를 부르기 위해
   const endedRef = useRef(onEnded);
   const errorRef = useRef(onError);
@@ -94,6 +100,10 @@ export default function YoutubeStage({
         player = new YT.Player(slot, {
           width: "100%",
           height: "100%",
+          // 영상 ID 없이 만든 플레이어는 onReady를 영원히 보내지 않는다(빈 /embed/ 문서라
+          // 플레이어 스크립트가 아예 돌지 않는다). 그러면 손잡이가 등록되지 않아
+          // 이 무대는 아무 소용이 없어진다 — 반드시 실제 영상으로 세운다
+          videoId: initialVideoId.current,
           playerVars: { playsinline: 1, rel: 0 },
           events: {
             // 제어 메서드는 onReady 이후에야 생긴다 — 생성 직후에 손잡이를 넘기면
