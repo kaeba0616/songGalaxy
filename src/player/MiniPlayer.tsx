@@ -19,6 +19,34 @@ import YoutubeStage from "./YoutubeStage";
 
 /** 드래그로 옮긴 미니플레이어 위치 (뷰포트 좌상단 기준 px) */
 const POS_KEY = "songgalaxy-miniplayer-pos";
+/** 사용자가 고른 영상 크기 */
+const VIDEO_SIZE_KEY = "songgalaxy-video-size";
+
+/**
+ * 영상 패널 폭. 세로는 16:9로 따라가되 최소 200px을 지킨다.
+ *
+ * YouTube 개발자 정책이 플레이어를 200×200px보다 작게 표시하는 것을 금지한다.
+ * 16:9에서 세로 200px은 가로 356px이므로 가장 작은 크기를 360px으로 잡았다.
+ * 그보다 좁은 화면에서는 폭이 92vw로 줄어드는데, 그때 16:9를 그대로 따르면
+ * 세로가 200px 밑으로 떨어진다(320px 폰에서 165px — 실측). 그래서 컨테이너에
+ * min-h를 걸어 세로를 지키고, 남는 좌우는 YouTube가 검은 여백으로 채우게 둔다.
+ */
+const VIDEO_SIZES = [
+  { key: "sm", label: "작게", width: 360 },
+  { key: "md", label: "보통", width: 480 },
+  { key: "lg", label: "크게", width: 640 },
+] as const;
+
+type VideoSizeKey = (typeof VIDEO_SIZES)[number]["key"];
+
+/** 플레이어가 이보다 작아지면 정책 위반이다 (위 주석 참조) */
+const VIDEO_MIN_PX = 200;
+
+function readSavedVideoSize(): VideoSizeKey {
+  if (typeof window === "undefined") return "md";
+  const raw = localStorage.getItem(VIDEO_SIZE_KEY);
+  return VIDEO_SIZES.some((s) => s.key === raw) ? (raw as VideoSizeKey) : "md";
+}
 /** 화면 가장자리에서 최소한 남겨둘 여백 — 밖으로 완전히 나가지 않게 */
 const EDGE = 8;
 
@@ -76,6 +104,13 @@ export default function MiniPlayer() {
   const [dragging, setDragging] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [videoSize, setVideoSizeState] = useState<VideoSizeKey>(readSavedVideoSize);
+
+  /** 고른 크기를 기억해 다음 재생에도 그대로 쓴다 */
+  const setVideoSize = useCallback((key: VideoSizeKey) => {
+    setVideoSizeState(key);
+    localStorage.setItem(VIDEO_SIZE_KEY, key);
+  }, []);
   /** 목록을 위로 펼칠지 아래로 펼칠지 — 화면에서 바가 놓인 높이로 결정 */
   const [openUp, setOpenUp] = useState(true);
   /** 포인터와 바 좌상단의 간격 — 드래그 중 바가 튀지 않게 */
@@ -284,13 +319,19 @@ export default function MiniPlayer() {
       {stageMounted && (
         <div
           data-nodrag
+          style={{
+            width: VIDEO_SIZES.find((s) => s.key === videoSize)?.width,
+            maxWidth: "92vw",
+          }}
           className={
             videoExpanded
-              ? "mb-2 w-full overflow-hidden rounded-2xl border border-white/15 bg-black shadow-xl"
+              ? "mb-2 overflow-hidden rounded-2xl border border-white/15 bg-black shadow-xl"
               : "hidden"
           }
         >
-          <div className="aspect-video w-full">
+          {/* min-h: 좁은 화면에서 16:9를 그대로 두면 세로가 정책 하한 밑으로 떨어진다.
+              세로를 지키고 남는 좌우는 YouTube가 검은 여백으로 채운다 (위 주석 참조) */}
+          <div className="aspect-video w-full" style={{ minHeight: VIDEO_MIN_PX }}>
             <YoutubeStage
               videoId={stageVideoId}
               register={registerYoutube}
@@ -300,13 +341,32 @@ export default function MiniPlayer() {
               onError={reportYoutubeError}
             />
           </div>
-          <button
-            type="button"
-            onClick={() => setVideoExpanded(false)}
-            className="w-full cursor-pointer py-1.5 text-xs text-white/50 transition hover:bg-white/10 hover:text-white"
-          >
-            영상 접기 (재생이 멈춥니다)
-          </button>
+          <div className="flex items-center justify-between gap-2 px-2 py-1">
+            <div className="flex items-center gap-0.5">
+              {VIDEO_SIZES.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => setVideoSize(s.key)}
+                  aria-pressed={videoSize === s.key}
+                  className={`cursor-pointer rounded-full px-2 py-0.5 text-[11px] transition ${
+                    videoSize === s.key
+                      ? "bg-white/20 text-white"
+                      : "text-white/40 hover:bg-white/10 hover:text-white/80"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setVideoExpanded(false)}
+              className="cursor-pointer rounded-full px-2 py-0.5 text-[11px] text-white/50 transition hover:bg-white/10 hover:text-white"
+            >
+              영상 접기 (재생이 멈춥니다)
+            </button>
+          </div>
         </div>
       )}
 
