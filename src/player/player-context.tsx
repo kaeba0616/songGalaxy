@@ -233,10 +233,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         previewUrl,
       });
       if (!chosen) return Promise.reject(new Error("no-source"));
-      // 무대가 아직 준비되지 않았으면 상태를 건드리기 전에 물러난다 —
-      // 반쯤 켜두면 빈 무대만 펼쳐진 채 재생 버튼도 먹지 않는 상태에 갇힌다
       const yt = chosen === "youtube" ? ytRef.current : null;
-      if (chosen === "youtube" && !yt) return Promise.reject(new Error("yt-not-ready"));
+      if (chosen === "youtube" && !yt) {
+        // 무대가 아직 준비되지 않았다. 엔진·무대 상태는 건드리지 않고 물러난다 —
+        // 반쯤 켜두면 빈 무대만 펼쳐진 채 재생 버튼도 먹지 않는 상태에 갇힌다.
+        // 다만 울리던 미리듣기는 반드시 멈춘다: 호출부들이 이 거부를 삼키며
+        // playingId를 지우므로, 그냥 두면 조작할 UI 없이 소리만 남는다
+        audioRef.current?.pause();
+        setPaused(true);
+        return Promise.reject(new Error("yt-not-ready"));
+      }
 
       silenceOther(chosen);
       setEngine(chosen);
