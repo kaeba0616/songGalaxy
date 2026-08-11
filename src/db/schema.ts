@@ -145,8 +145,36 @@ export const userStars = pgTable("user_stars", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+/** 사용자가 만든 노래 목록. share_slug가 있으면 그 slug를 아는 누구나 열람 가능 */
+export const playlists = pgTable("playlists", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  name: text("name").notNull(),
+  /** NULL이면 비공개. 값이 있으면 /list/[slug]로 열람 가능 */
+  shareSlug: text("share_slug").unique(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/**
+ * 목록에 담긴 곡. 곡 개수는 여기서 count로 구한다 — 컬럼으로 저장하지 않는다 (SSOT).
+ * position은 구멍이 생길 수 있으므로 순서 비교용으로만 쓰고 인덱스로 쓰지 않는다.
+ */
+export const playlistSongs = pgTable(
+  "playlist_songs",
+  {
+    playlistId: integer("playlist_id").notNull(),
+    songId: integer("song_id").notNull(),
+    position: integer("position").notNull(),
+    addedAt: timestamp("added_at").notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.playlistId, table.songId] })],
+);
+
 export type Theme = typeof themes.$inferSelect;
 export type Song = typeof songs.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Like = typeof likes.$inferSelect;
 export type UserStar = typeof userStars.$inferSelect;
+export type Playlist = typeof playlists.$inferSelect;
+export type PlaylistSong = typeof playlistSongs.$inferSelect;
