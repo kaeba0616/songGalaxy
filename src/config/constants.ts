@@ -57,9 +57,18 @@ export const YT_ERROR_WINDOW_MS = 15_000;
 export const YT_ERROR_LIMIT = 3;
 
 /**
- * 한 사용자가 하루(직전 24시간)에 태울 수 있는 YouTube 검색 횟수.
+ * 한 곡에서 일시적 재생 오류("playback")를 이만큼 만나면 그 곡의 영상을 이 큐에서 포기한다.
+ * 위의 폭주 차단은 창(15초) 안에 몰린 오류만 잡아서, 재생 도중 드문드문 나는 오류(코드 5 등)는
+ * 영원히 걸리지 않는다 — 그 경우 같은 곡이 처음부터 계속 다시 시작된다.
+ * 1이면 한 번 튄 것만으로 멀쩡한 영상을 버리므로, "한 번은 다시 시도"에 해당하는 2로 둔다.
+ */
+export const YT_PLAYBACK_ERROR_LIMIT = 2;
+
+/**
+ * 한 사용자가 하루(UTC 날짜 기준)에 태울 수 있는 YouTube 검색 횟수.
  * 서비스 전체 무료 쿼터가 하루 100회(검색 1회 = 100유닛)라 한 사람이 다 쓰면
  * 나머지 사용자 전원이 그날 영상을 못 찾는다.
+ * 소비량은 `youtube_lookups` 테이블에 쌓인다 — 실패한 조회도 쿼터를 먹으므로 함께 센다.
  */
 export const YOUTUBE_LOOKUPS_PER_USER_PER_DAY = 20;
 

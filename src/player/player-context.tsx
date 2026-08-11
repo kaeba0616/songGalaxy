@@ -21,6 +21,7 @@ import {
   ENRICH_BATCH,
   YT_ERROR_LIMIT,
   YT_ERROR_WINDOW_MS,
+  YT_PLAYBACK_ERROR_LIMIT,
   YT_STAGE_READY_TIMEOUT_MS,
 } from "@/config/constants";
 import { pickEngine, type Engine } from "./engine";
@@ -176,6 +177,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [notice, setNotice] = useState<string | null>(null);
   /** 영상 오류 폭주 감지용 — 창(window) 시작 시각과 그 창에서 센 오류 수 */
   const ytErrorsRef = useRef<{ since: number; count: number }>({ since: 0, count: 0 });
+  /**
+   * 곡별 "playback" 오류 누적(곡 id → 횟수).
+   * 위의 폭주 감지는 시간 창을 쓰므로 드문드문 나는 오류는 못 잡는다 — 그때 같은 곡이
+   * 무한히 처음부터 다시 시작되는 것을 이 카운터가 막는다. 목록을 새로 틀 때 비운다.
+   */
+  const ytSongErrorsRef = useRef<Map<number, number>>(new Map());
 
   const setEngine = useCallback((e: Engine | null) => {
     engineRef.current = e;
@@ -570,6 +577,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (idx < 0) throw new Error("곡이 목록에 없습니다");
       // 새 목록이니 앞 목록에서 쌓인 오류 이력·안내는 지운다
       ytErrorsRef.current = { since: 0, count: 0 };
+      ytSongErrorsRef.current = new Map();
       setNotice(null);
       // 시작 곡에 영상도 미리듣기도 없을 수 있다 — 거기서 멈추지 않고 뒤로 넘어가
       // 재생 가능한 첫 곡을 찾는다. 한 곡 때문에 목록 전체가 죽으면 안 된다
@@ -603,6 +611,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
    * 영영 재생되지 않는다. 그리고 오류 → 다음 곡 → 오류가 iframe 로드 속도로 이어지면
    * 목록 전체가 몇 초 만에 타버리므로, 짧은 창 안에 오류가 쌓이면 이 목록은 통째로
    * 미리듣기로 내리고 안내를 남긴다(설계의 "IFrame 실패 → 전체 미리듣기 + 안내 한 줄").
+   * 그 폭주 차단은 시간 창을 쓰므로 넓게 흩어진 오류는 잡지 못한다 — 그래서 곡별로도
+   * 시도 횟수에 상한을 둔다(`YT_PLAYBACK_ERROR_LIMIT`). 두 장치는 서로를 대신하지 않는다.
    */
   const reportYoutubeError = useCallback(
     (reason: YoutubeErrorReason): void => {
@@ -630,9 +640,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         ytErrorsRef.current.count += 1;
         const giveUp = ytErrorsRef.current.count >= YT_ERROR_LIMIT;
 
-        // 큐에서도 죽은 영상 ID를 지운다 — 남겨두면 같은 영상을 계속 다시 시도한다
+        // "playback"은 한 번은 그대로 다시 시도한다 — 진짜 일시적인 오류가 흔해서
+        // 첫 실패에 영상을 버리면 멀쩡히 재생될 곡을 30초 미리듣기로 강등시킨다.
+        // 다만 같은 곡에서 반복되면 포기한다: 그러지 않으면 findPlayable이 같은 영상 ID로
+        // 같은 곡을 계속 돌려줘 곡이 처음부터 무한히 다시 시작된다(폭주 창에도 안 걸린다).
+        let repeated = false;
+        if (reason === "playback") {
+          const seen = (ytSongErrorsRef.current.get(id) ?? 0) + 1;
+          ytSongErrorsRef.current.set(id, seen);
+          repeated = seen >= YT_PLAYBACK_ERROR_LIMIT;
+        }
+        // 큐에서도 못 쓰는 영상 ID를 지운다 — 남겨두면 같은 영상을 계속 다시 시도한다.
+        // 반복된 "playback"은 큐에서만 지우고 서버 캐시(clearYoutubeVideoId)는 건드리지 않는다:
+        // 영상 자체는 멀쩡할 수 있고, 다음에 이 목록을 다시 틀면 한 번 더 기회를 준다
+        const dropVideo = reason !== "playback" || repeated;
         let next = q;
-        if (q && badId && reason !== "playback") {
+        if (q && badId && dropVideo) {
           next = {
             ...q,
             songs: q.songs.map((s) => (s.id === id ? { ...s, youtubeVideoId: null } : s)),
@@ -643,7 +666,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           queueRef.current = next;
           setQueueState(next);
         }
-        setNotice(giveUp ? "영상을 틀 수 없어 30초 미리듣기로 이어 듣습니다" : null);
+        setNotice(
+          giveUp
+            ? "영상을 틀 수 없어 30초 미리듣기로 이어 듣습니다"
+            : repeated && badId
+              ? "이 곡은 영상이 계속 끊겨 30초 미리듣기로 재생합니다"
+              : null,
+        );
 
         const cur = queueRef.current;
         if (!cur) return;

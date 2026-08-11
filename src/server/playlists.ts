@@ -1,9 +1,6 @@
-import { and, desc, eq, gte, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
-import {
-  YOUTUBE_LOOKUPS_PER_USER_PER_DAY,
-  YOUTUBE_LOOKUP_RETRY_MAX,
-} from "@/config/constants";
+import { YOUTUBE_LOOKUP_RETRY_MAX } from "@/config/constants";
 import { generateShareSlug } from "@/lib/share-slug";
 import { nextPosition } from "@/player/engine";
 import { getYoutubeVideoId } from "@/server/youtube";
@@ -184,33 +181,6 @@ export async function songInUsersPlaylist(userId: number, songId: number): Promi
 }
 
 /**
- * 이 사용자가 직전 24시간에 태운 영상 검색 횟수(근사).
- *
- * 별도 집계 테이블을 두지 않는다 — 검색이 일어나면 `songs.youtube_checked_at`이 찍히므로
- * "내 목록에 든 곡 중 최근 24시간 안에 조회된 곡 수"로 셀 수 있다
- * (SSOT: 계산할 수 있는 값은 저장하지 않는다).
- * 남이 먼저 조회해 준 곡까지 내 몫으로 세는 과대평가가 있지만, 한도의 목적이
- * "한 사람이 전체 쿼터를 말리지 못하게"이므로 과대평가는 안전한 방향이다.
- */
-async function lookupsSpentToday(userId: number): Promise<number> {
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [row] = await db
-    .select({ n: sql<number>`count(distinct ${schema.playlistSongs.songId})::int` })
-    .from(schema.playlistSongs)
-    .innerJoin(schema.playlists, eq(schema.playlists.id, schema.playlistSongs.playlistId))
-    .innerJoin(schema.songs, eq(schema.songs.id, schema.playlistSongs.songId))
-    .where(
-      and(eq(schema.playlists.userId, userId), gte(schema.songs.youtubeCheckedAt, since)),
-    );
-  return row?.n ?? 0;
-}
-
-/** 하루 한도가 남았는지 — 넘었으면 검색을 아예 걸지 않는다(담기는 그대로 성공한다) */
-async function hasLookupBudget(userId: number): Promise<boolean> {
-  return (await lookupsSpentToday(userId)) < YOUTUBE_LOOKUPS_PER_USER_PER_DAY;
-}
-
-/**
  * 목록에 곡을 담는다.
  *
  * 여기가 YouTube 영상 ID를 새로 찾는 두 지점 중 하나다(다른 하나는 아래
@@ -220,7 +190,9 @@ async function hasLookupBudget(userId: number): Promise<boolean> {
  * 조회에 실패해도 담기는 성공시킨다 — 그 곡만 미리듣기로 재생되고,
  * 영상은 다음에 다시 시도된다.
  * 한 사람이 하루 쿼터 전체(100곡)를 말려 다른 모든 사용자의 영상을 끊는 일이 없도록
- * 사용자별 하루 한도를 넘으면 검색을 걸지 않는다 — 담기 자체는 그대로 성공한다.
+ * 사용자별 하루 한도를 두는데, 그 판단은 여기가 아니라 `getYoutubeVideoId` 안에 있다 —
+ * 검사와 소비가 붙어 있어야 동시 요청이 함께 새지 않는다. 한도를 넘으면 영상만 못 찾고
+ * 담기 자체는 그대로 성공한다.
  *
  * "already"·"nosong" 둘 다 insert보다 먼저 반환한다 — 어느 경우든 실제로
  * 새로 담기는 일이 없으므로 아래 getYoutubeVideoId 호출까지 가면 안 된다.
@@ -267,9 +239,7 @@ export async function addSongToPlaylist(
     .set({ updatedAt: new Date() })
     .where(eq(schema.playlists.id, playlistId));
 
-  if (await hasLookupBudget(userId)) {
-    await getYoutubeVideoId(songId).catch(() => null);
-  }
+  await getYoutubeVideoId(songId, userId).catch(() => null);
   return "added";
 }
 
@@ -298,10 +268,11 @@ export async function retryMissingVideos(userId: number, playlistId: number): Pr
     .orderBy(schema.playlistSongs.position)
     .limit(YOUTUBE_LOOKUP_RETRY_MAX);
   if (candidates.length === 0) return 0;
-  if (!(await hasLookupBudget(userId))) return 0;
 
+  // 한도 확인은 getYoutubeVideoId 안에서 곡마다 원자적으로 이뤄진다 —
+  // 여기서 한 번 미리 보면 세 건이 같은 잔량을 읽고 전부 통과한다
   const found = await Promise.all(
-    candidates.map((c) => getYoutubeVideoId(c.id).catch(() => null)),
+    candidates.map((c) => getYoutubeVideoId(c.id, userId).catch(() => null)),
   );
   return found.filter(Boolean).length;
 }

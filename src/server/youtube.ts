@@ -1,6 +1,32 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { YOUTUBE_LOOKUPS_PER_USER_PER_DAY } from "@/config/constants";
 import { env } from "@/config/env";
+
+/**
+ * 오늘 몫의 검색 1회를 선점한다 — 통과하면 true, 한도를 다 썼으면 false.
+ *
+ * 세 가지를 한꺼번에 막는다.
+ * ① 되돌릴 수 없다: 목록 곡을 세는 게 아니라 전용 행을 올리므로 곡을 빼도 줄지 않는다.
+ * ② 실패도 센다: 호출부가 fetch 직전에 부르고, 403·타임아웃이어도 되돌리지 않는다
+ *    (실패한 호출도 쿼터를 먹는다).
+ * ③ 동시 요청이 함께 통과하지 못한다: 예전엔 "읽고 → 조회"라 N개가 같은 값을 읽고 전부
+ *    통과했다. 증가와 검사를 UPSERT 한 문장에 묶어 두면 같은 행을 노리는 요청들이 DB에서
+ *    줄을 서고, 한도를 넘긴 쪽은 갱신 대상에서 빠져 아무 행도 돌려받지 못한다.
+ */
+async function reserveLookup(userId: number): Promise<boolean> {
+  if (YOUTUBE_LOOKUPS_PER_USER_PER_DAY <= 0) return false; // 한도 0이면 INSERT 분기가 1을 통과시킨다
+  const rows = await db
+    .insert(schema.youtubeLookups)
+    .values({ userId, day: sql`(now() at time zone 'utc')::date`, count: 1 })
+    .onConflictDoUpdate({
+      target: [schema.youtubeLookups.userId, schema.youtubeLookups.day],
+      set: { count: sql`${schema.youtubeLookups.count} + 1` },
+      setWhere: sql`${schema.youtubeLookups.count} < ${YOUTUBE_LOOKUPS_PER_USER_PER_DAY}`,
+    })
+    .returning({ count: schema.youtubeLookups.count });
+  return rows.length > 0;
+}
 
 /**
  * 곡의 YouTube 영상 ID 조회 — 원본은 YouTube Data API, songs 테이블에 캐시 (docs/SSOT.md).
@@ -8,8 +34,12 @@ import { env } from "@/config/env";
  * 참고: iframe의 listType=search 임베드는 2020년에 제거되어 쓸 수 없다.
  * Data API 검색은 무료 쿼터가 하루 1만 유닛(검색 1회 = 100유닛 = 하루 100곡)이라
  * 곡당 1회만 검색하고 영구 캐시한다. 키가 없으면 null (호출부에서 검색 링크 폴백).
+ *
+ * `userId`는 이 조회의 값을 치를 사람이다 — 한 사람이 서비스 전체 쿼터를 말리지 못하도록
+ * 여기서(=실제로 외부 호출이 나가는 유일한 지점) 하루 한도를 선점한다. 호출부에서 미리
+ * 세던 예전 방식은 캐시 적중까지 한도를 깎거나, 검사와 소비 사이가 벌어져 새어 나갔다.
  */
-export async function getYoutubeVideoId(songId: number): Promise<string | null> {
+export async function getYoutubeVideoId(songId: number, userId: number): Promise<string | null> {
   const [song] = await db
     .select({
       title: schema.songs.title,
@@ -24,6 +54,10 @@ export async function getYoutubeVideoId(songId: number): Promise<string | null> 
 
   const key = env.youtubeApiKey;
   if (!key) return null; // 키가 없으면 checked를 기록하지 않는다 — 키 설정 후 다시 시도되게
+
+  // 여기부터가 쿼터를 태우는 구간이다. 캐시 적중(위)과 키 없음은 한 유닛도 쓰지 않으므로
+  // 한도를 깎지 않는다 — 이미 찾아둔 곡을 담는 것만으로 한도가 마르면 안 된다
+  if (!(await reserveLookup(userId))) return null;
 
   let videoId: string | null = null;
   try {

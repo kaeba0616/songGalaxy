@@ -4,6 +4,7 @@
  */
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -171,6 +172,26 @@ export const playlistSongs = pgTable(
   (table) => [primaryKey({ columns: [table.playlistId, table.songId] })],
 );
 
+/**
+ * 사용자별 YouTube 검색 소비량 — "실제로 태운 쿼터"의 원본 (docs/SSOT.md).
+ *
+ * 이 값만은 계산으로 되살릴 수 없어 저장한다(SSOT의 "저장하지 않는다" 원칙의 예외).
+ * 예전엔 "내 목록에 든 곡 중 최근 조회된 곡 수"로 셌는데, 곡을 빼거나 목록을 지우면
+ * 카운터가 되돌아가 담기→조회→빼기를 반복하면 한도가 사실상 없었고, 403·타임아웃으로
+ * 실패한 조회는 쿼터를 태우고도 한 번도 세지 않았다. 그래서 "조회를 시도한 순간"
+ * 단조 증가하는 행을 따로 둔다 — 목록을 어떻게 주무르든 줄지 않는다.
+ */
+export const youtubeLookups = pgTable(
+  "youtube_lookups",
+  {
+    userId: integer("user_id").notNull(),
+    /** UTC 날짜 — 이 날짜가 넘어가면 한도가 리셋된다 */
+    day: date("day").notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.day] })],
+);
+
 export type Theme = typeof themes.$inferSelect;
 export type Song = typeof songs.$inferSelect;
 export type User = typeof users.$inferSelect;
@@ -178,3 +199,4 @@ export type Like = typeof likes.$inferSelect;
 export type UserStar = typeof userStars.$inferSelect;
 export type Playlist = typeof playlists.$inferSelect;
 export type PlaylistSong = typeof playlistSongs.$inferSelect;
+export type YoutubeLookup = typeof youtubeLookups.$inferSelect;
