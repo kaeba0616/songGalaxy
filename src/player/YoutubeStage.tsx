@@ -38,6 +38,12 @@ let apiPromise: Promise<YT> | null = null;
 function loadApi(): Promise<YT> {
   if (apiPromise) return apiPromise;
   apiPromise = new Promise<YT>((resolve, reject) => {
+    // 실패한 약속을 캐시에 남기면 네트워크가 한 번 흔들린 것만으로
+    // 이 세션 내내 YouTube가 죽는다 — 실패하면 캐시를 비워 다음 마운트가 다시 시도하게 한다
+    const fail = (e: Error) => {
+      apiPromise = null;
+      reject(e);
+    };
     if (window.YT?.Player) {
       resolve(window.YT);
       return;
@@ -46,11 +52,11 @@ function loadApi(): Promise<YT> {
     window.onYouTubeIframeAPIReady = () => {
       prev?.();
       if (window.YT) resolve(window.YT);
-      else reject(new Error("YT 없음"));
+      else fail(new Error("YT 없음"));
     };
     const s = document.createElement("script");
     s.src = "https://www.youtube.com/iframe_api";
-    s.onerror = () => reject(new Error("IFrame API 로드 실패"));
+    s.onerror = () => fail(new Error("IFrame API 로드 실패"));
     document.head.appendChild(s);
   });
   return apiPromise;
@@ -90,18 +96,24 @@ export default function YoutubeStage({
           height: "100%",
           playerVars: { playsinline: 1, rel: 0 },
           events: {
+            // 제어 메서드는 onReady 이후에야 생긴다 — 생성 직후에 손잡이를 넘기면
+            // Provider가 곧바로 부르는 setVolume에서 "is not a function"으로 터진다
+            onReady: (e: { target: YtPlayer }) => {
+              if (cancelled) return;
+              const ready = e.target;
+              register({
+                load: (videoId) => ready.loadVideoById(videoId),
+                play: () => ready.playVideo(),
+                pause: () => ready.pauseVideo(),
+                stop: () => ready.stopVideo(),
+                setVolume: (v) => ready.setVolume(Math.round(v * 100)),
+              });
+            },
             onStateChange: (e: { data: number }) => {
               if (e.data === YT.PlayerState.ENDED) endedRef.current();
             },
             onError: () => errorRef.current(),
           },
-        });
-        register({
-          load: (videoId) => player?.loadVideoById(videoId),
-          play: () => player?.playVideo(),
-          pause: () => player?.pauseVideo(),
-          stop: () => player?.stopVideo(),
-          setVolume: (v) => player?.setVolume(Math.round(v * 100)),
         });
       })
       .catch(() => errorRef.current());

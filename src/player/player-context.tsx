@@ -138,8 +138,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   /** 지금 켜져 있지 않은 엔진을 확실히 끈다 — 두 곳에서 동시에 소리가 나면 안 된다 */
   const silenceOther = useCallback((keep: Engine) => {
-    if (keep === "youtube") audioRef.current?.pause();
-    else ytRef.current?.stop();
+    if (keep === "youtube") {
+      audioRef.current?.pause();
+      return;
+    }
+    ytRef.current?.stop();
+    // 미리듣기로 넘어왔는데 빈 영상 무대가 은하를 덮고 있으면 안 된다
+    setVideoExpandedState(false);
   }, []);
 
   const setPlayingId = useCallback((id: number | null) => {
@@ -176,10 +181,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [changeVolume]);
 
   // 볼륨 뒤에 둔다 — 등록 즉시 현재 볼륨을 맞춰야 첫 곡부터 소리 크기가 같다
-  const registerYoutube = useCallback((api: YoutubeApi | null) => {
-    ytRef.current = api;
-    if (api) api.setVolume(volumeRef.current);
-  }, []);
+  const registerYoutube = useCallback(
+    (api: YoutubeApi | null) => {
+      ytRef.current = api;
+      if (api) {
+        api.setVolume(volumeRef.current);
+        return;
+      }
+      // 무대가 사라지면 영상은 이미 멈춘 것이다 — 재생 중이라고 우기면
+      // 재생 버튼이 먹통이 되므로(누를 손잡이가 없다) 일시정지로 표시한다
+      if (engineRef.current === "youtube") setPaused(true);
+    },
+    [setPaused],
+  );
 
   // ── 미디어 캐시 (앨범아트/미리듣기 URL, /api/enrich) ─────────
   const [media, setMedia] = useState<Record<number, Media>>({});
@@ -219,17 +233,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         previewUrl,
       });
       if (!chosen) return Promise.reject(new Error("no-source"));
+      // 무대가 아직 준비되지 않았으면 상태를 건드리기 전에 물러난다 —
+      // 반쯤 켜두면 빈 무대만 펼쳐진 채 재생 버튼도 먹지 않는 상태에 갇힌다
+      const yt = chosen === "youtube" ? ytRef.current : null;
+      if (chosen === "youtube" && !yt) return Promise.reject(new Error("yt-not-ready"));
 
       silenceOther(chosen);
       setEngine(chosen);
       setPlayingId(song.id);
       setPaused(false);
 
-      if (chosen === "youtube") {
+      if (yt) {
         // 영상을 트려면 패널이 보여야 한다
         setVideoExpandedState(true);
-        const yt = ytRef.current;
-        if (!yt) return Promise.reject(new Error("yt-not-ready"));
         yt.setVolume(volumeRef.current);
         yt.load(song.youtubeVideoId as string);
         yt.play();
@@ -426,12 +442,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const snapshot = useCallback((): PlayerSnapshot | null => {
     const audio = audioRef.current;
     const id = playingIdRef.current;
-    if (id === null || !audio) return null;
+    // 오디오 객체가 있는지는 따지지 않는다 — 목록 재생만 한 세션은 오디오가 아예 없는데,
+    // 여기서 null을 주면 행성에 내릴 때 호출부가 stop()으로 목록을 통째로 날린다
+    if (id === null) return null;
     // 위치는 미리듣기 엔진의 것만 의미가 있다 — 영상 재생 중이면 남아 있는 옛 위치를 쓰지 않는다
     return {
       queue: queueRef.current,
       songId: id,
-      time: engineRef.current === "preview" ? audio.currentTime : 0,
+      time: audio && engineRef.current === "preview" ? audio.currentTime : 0,
     };
   }, []);
 
