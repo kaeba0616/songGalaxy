@@ -66,6 +66,8 @@ export interface YoutubeApi {
  * 그래서 버리지 않고 여기 담아 두었다가 onReady 때 그대로 다시 튼다.
  */
 interface PendingYoutube {
+  /** 요청 일련번호 — 시간 초과가 "자기 요청"을 정리하는지 확인하는 데 쓴다 */
+  seq: number;
   song: PlayerSong;
   resolve: () => void;
   reject: (e: Error) => void;
@@ -144,6 +146,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [videoExpanded, setVideoExpandedState] = useState(false);
   const ytRef = useRef<YoutubeApi | null>(null);
   const pendingYtRef = useRef<PendingYoutube | null>(null);
+  const pendingSeqRef = useRef(0);
 
   const setEngine = useCallback((e: Engine | null) => {
     engineRef.current = e;
@@ -178,13 +181,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [setPlayingId],
   );
 
-  /** 보류 중인 영상 요청을 취소한다. reason이 있으면 호출부에 실패로 알린다 */
-  const clearPendingYt = useCallback((reason: Error | null): void => {
+  /**
+   * 보류 중인 영상 요청을 끝낸다.
+   * 반드시 promise를 매듭짓는다 — 조용히 버리면 그 요청을 기다리던 호출부(목록 화면의
+   * 로딩 표시 같은 것)가 영원히 기다리고, 클로저도 붙잡힌 채 남는다.
+   */
+  const rejectPendingYt = useCallback((reason: Error): void => {
     const p = pendingYtRef.current;
     if (!p) return;
     pendingYtRef.current = null;
     clearTimeout(p.timer);
-    if (reason) p.reject(reason);
+    p.reject(reason);
   }, []);
 
   // ── 볼륨 (localStorage 유지) ──────────────────────────────
@@ -304,7 +311,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (chosen === "youtube") {
         const yt = ytRef.current;
         if (yt) {
-          clearPendingYt(null); // 새 요청이 이겼다 — 기다리던 것은 조용히 버린다
+          // 새 요청이 이겼다 — 기다리던 요청은 "밀렸다"고 알리고 끝낸다
+          rejectPendingYt(new Error("superseded"));
           startYoutube(yt, song);
           return Promise.resolve();
         }
@@ -316,18 +324,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         audioRef.current?.pause();
         setPaused(true);
         setPlayingId(song.id);
-        clearPendingYt(new Error("superseded"));
+        rejectPendingYt(new Error("superseded"));
         return new Promise<void>((resolve, reject) => {
+          const seq = ++pendingSeqRef.current;
           const timer = setTimeout(() => {
+            // 기다리는 사이 다른 요청이 자리를 차지했을 수 있다. 그때 여기서 뒷정리를 하면
+            // (특히 같은 곡을 다시 튼 경우) 새 요청이 세워 둔 알약과 무대를 대신 무너뜨린다
+            if (pendingYtRef.current?.seq !== seq) return;
             pendingYtRef.current = null;
             clearIfStill(song.id);
             reject(new Error("yt-not-ready"));
           }, YT_STAGE_READY_TIMEOUT_MS);
-          pendingYtRef.current = { song, resolve, reject, timer };
+          pendingYtRef.current = { seq, song, resolve, reject, timer };
         });
       }
 
-      clearPendingYt(null); // 미리듣기로 방향이 바뀌었으니 기다리던 영상은 버린다
+      // 미리듣기로 방향이 바뀌었다 — 기다리던 영상 요청도 매듭지어야 한다
+      rejectPendingYt(new Error("superseded"));
       silenceOther(chosen);
       setEngine(chosen);
       setPlayingId(song.id);
@@ -340,7 +353,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.onended = () => void advanceRef.current(song.id);
       return audio.play();
     },
-    [clearIfStill, clearPendingYt, setEngine, setPaused, setPlayingId, silenceOther, startYoutube],
+    [clearIfStill, rejectPendingYt, setEngine, setPaused, setPlayingId, silenceOther, startYoutube],
   );
 
   useEffect(() => {
@@ -414,7 +427,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (pendingYtRef.current) return;
     if (engineRef.current === "youtube") {
       const yt = ytRef.current;
-      if (!yt) return;
+      if (!yt) {
+        // 무대가 (다시) 서는 중이다 — 은하 카드 패널을 열었다 닫으면 알약과 함께 무대도
+        // 내려갔다가 다시 오르는데, 그 창에서 그냥 물러나면 재생 버튼도 "펼치고 이어 듣기"도
+        // 아무 반응이 없는 막다른 길이 된다. 지금 곡을 다시 요청해 두면 무대가 준비되는
+        // 즉시 이어서 울린다 (보류 → onReady 재실행 경로를 그대로 탄다)
+        const q = queueRef.current;
+        const song = q?.songs.find((s) => s.id === playingIdRef.current);
+        if (song) {
+          const m = mediaRef.current[song.id];
+          void playSong(song, m?.previewUrl ?? null, q?.mode ?? "browse").catch(() => undefined);
+        }
+        return;
+      }
       if (isPausedRef.current) {
         setVideoExpandedState(true); // 접힌 채로 재생되면 안 된다
         yt.play();
@@ -434,7 +459,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.pause();
       setPaused(true);
     }
-  }, [setPaused, setPlayingId]);
+  }, [playSong, setPaused, setPlayingId]);
 
   /**
    * 영상 패널 접기/펼치기.
@@ -497,14 +522,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const stop = useCallback(() => {
     audioRef.current?.pause();
     ytRef.current?.stop();
-    clearPendingYt(new Error("stopped")); // 기다리던 요청이 정지 뒤에 되살아나면 안 된다
+    rejectPendingYt(new Error("stopped")); // 기다리던 요청이 정지 뒤에 되살아나면 안 된다
     setEngine(null);
     setVideoExpandedState(false);
     setPlayingId(null);
     setPaused(false);
     queueRef.current = null;
     setQueueState(null);
-  }, [clearPendingYt, setEngine, setPaused, setPlayingId]);
+  }, [rejectPendingYt, setEngine, setPaused, setPlayingId]);
 
   /** 목록 재생 시작 — 큐에 mode: "playlist"를 박아 YouTube 전곡 재생을 시도한다 */
   const playPlaylist = useCallback(

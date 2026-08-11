@@ -304,13 +304,14 @@ export default function MiniPlayer() {
         </div>
       )}
 
+      {/* 펼치기는 toggle에만 맡긴다 — 여기서 setVideoExpanded(true)를 먼저 부르면,
+          무대가 아직 다시 서는 중일 때 패널만 펼쳐진 채 이 버튼이 사라져 되돌릴 길이 없다.
+          toggle은 손잡이가 있으면 펼치며 재생하고, 없으면 곡을 다시 요청해 둔다.
+          어느 쪽이든 소리가 실제로 나기 시작할 때 비로소 펼쳐지므로 이 버튼도 그때 사라진다 */}
       {engine === "youtube" && !videoExpanded && (
         <button
           type="button"
-          onClick={() => {
-            setVideoExpanded(true);
-            toggle();
-          }}
+          onClick={toggle}
           className="mb-2 w-full cursor-pointer rounded-full border border-white/15 bg-black/80 py-1.5 text-xs text-white/70 backdrop-blur transition hover:bg-white/10"
         >
           영상 펼치고 이어 듣기
