@@ -12,8 +12,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ENRICH_BATCH } from "@/config/constants";
 import { useLikes } from "@/likes/likes-context";
+import AddToPlaylist from "./AddToPlaylist";
 import Marquee from "./Marquee";
 import { usePlayer } from "./player-context";
+import YoutubeStage from "./YoutubeStage";
 
 /** 드래그로 옮긴 미니플레이어 위치 (뷰포트 좌상단 기준 px) */
 const POS_KEY = "songgalaxy-miniplayer-pos";
@@ -55,10 +57,16 @@ export default function MiniPlayer() {
     changeVolume,
     toggleMute,
     fetchMedia,
-    playFrom,
+    playInQueue,
     toggle,
     playStep,
     uiHosted,
+    engine,
+    videoExpanded,
+    setVideoExpanded,
+    registerYoutube,
+    reportYoutubeError,
+    notice,
   } = usePlayer();
   const { auth, toggleLike } = useLikes();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -67,6 +75,7 @@ export default function MiniPlayer() {
   const [pos, setPos] = useState<Pos | null>(readSavedPos);
   const [dragging, setDragging] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   /** 목록을 위로 펼칠지 아래로 펼칠지 — 화면에서 바가 놓인 높이로 결정 */
   const [openUp, setOpenUp] = useState(true);
   /** 포인터와 바 좌상단의 간격 — 드래그 중 바가 튀지 않게 */
@@ -93,6 +102,31 @@ export default function MiniPlayer() {
   const songs = queue?.songs ?? NO_SONGS;
   const currentIndex = songs.findIndex((s) => s.id === playingId);
 
+  /**
+   * 영상 무대를 언제, 어떤 영상으로 걸어 둘지.
+   * `engine === "youtube"`가 된 뒤에 거는 것은 너무 늦다 — 무대가 없으면 영상 재생
+   * 요청 자체가 시작되지 못하고(무대는 재생을 눌러야 뜨는데 재생은 무대가 있어야
+   * 성공하는 교착), 무대가 뜬 뒤에도 IFrame 스크립트를 내려받는 시간이 더 걸린다.
+   * 그래서 "목록 큐가 잡힌 순간"부터 미리 걸어 데워 둔다.
+   * 접었다고 내리지도 않는다 — 내리면 손잡이가 사라져 다시 펼칠 수 없다.
+   *
+   * 영상 ID를 함께 넘기는 이유: 빈 플레이어는 onReady를 보내지 않는다(YoutubeStage 주석).
+   * 지금 곡에 ID가 없으면(미리듣기로 떨어진 곡) 목록에서 ID 있는 첫 곡을 씨앗으로 쓴다 —
+   * 무대를 세워 두는 것이 목적이고, 실제로 틀 영상은 Provider가 load()로 갈아 끼운다.
+   */
+  const stageVideoId =
+    (playingId !== null ? songs.find((s) => s.id === playingId)?.youtubeVideoId : null) ??
+    songs.find((s) => s.youtubeVideoId)?.youtubeVideoId ??
+    null;
+  const stageMounted =
+    (engine === "youtube" || queue?.mode === "playlist") && stageVideoId !== null;
+
+  // 목록 재생은 영상 ID가 있으면 /api/enrich를 건너뛴다 — 그래서 앨범아트가 비어 있다.
+  // 지금 듣는 곡 것만 따로 채워 원반이 ✦ 자리표시자로 남지 않게 한다
+  useEffect(() => {
+    if (playingId !== null && !media[playingId]) void fetchMedia([playingId]);
+  }, [playingId, media, fetchMedia]);
+
   // 목록을 펼치면 현재 곡 주변의 앨범아트를 보강하고, 현재 곡이 보이도록 스크롤
   useEffect(() => {
     if (!expanded || songs.length === 0) return;
@@ -109,21 +143,24 @@ export default function MiniPlayer() {
   const toggleExpanded = () => {
     const r = wrapRef.current?.getBoundingClientRect();
     if (r) setOpenUp(r.top > window.innerHeight / 2);
+    setAddOpen(false); // 둘 다 알약 위에 뜬다 — 겹치지 않게 하나만 연다
     setExpanded((v) => !v);
   };
 
   useEffect(() => {
-    if (!expanded) return;
+    if (!expanded && !addOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setExpanded(false);
+      if (e.key !== "Escape") return;
+      setExpanded(false);
+      setAddOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [expanded]);
+  }, [expanded, addOpen]);
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    // 버튼·볼륨 슬라이더·재생 목록 위에서 시작한 입력은 드래그가 아니다
-    if ((e.target as HTMLElement).closest("button, input, [data-playlist]")) return;
+    // 버튼·볼륨 슬라이더·알약에 붙은 패널(재생 목록·영상·담기) 위에서 시작한 입력은 드래그가 아니다
+    if ((e.target as HTMLElement).closest("button, input, [data-playlist], [data-nodrag]")) return;
     const el = wrapRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
@@ -197,8 +234,10 @@ export default function MiniPlayer() {
                     type="button"
                     data-current={isCurrent}
                     onClick={() => {
+                      // playInQueue는 이 큐의 mode를 지킨다 — 목록 재생 중에 곡을 고르면
+                      // 30초 미리듣기로 강등되지 않고 그대로 영상으로 이어진다
                       if (isCurrent) toggle();
-                      else if (queue) void playFrom(queue, s.id).catch(() => undefined);
+                      else if (queue) void playInQueue(queue, s.id).catch(() => undefined);
                     }}
                     className={`flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left transition hover:bg-white/10 ${
                       isCurrent ? "bg-white/10" : ""
@@ -233,6 +272,63 @@ export default function MiniPlayer() {
             })}
           </ul>
         </div>
+      )}
+
+      {addOpen && playingId !== null && (
+        <AddToPlaylist songId={playingId} onClose={() => setAddOpen(false)} />
+      )}
+
+      {/* 목록 재생 중에는 영상이 보여야 한다 (약관). 접으면 재생도 멈춘다.
+          접혀 있어도 무대는 DOM에 남긴다 — 내리면 손잡이가 사라져 이어 들을 수 없다.
+          감춘 동안에는 Provider가 반드시 멈춘 상태로 유지한다 */}
+      {stageMounted && (
+        <div
+          data-nodrag
+          className={
+            videoExpanded
+              ? "mb-2 w-full overflow-hidden rounded-2xl border border-white/15 bg-black shadow-xl"
+              : "hidden"
+          }
+        >
+          <div className="aspect-video w-full">
+            <YoutubeStage
+              videoId={stageVideoId}
+              register={registerYoutube}
+              onEnded={() => void playStep(1)}
+              // 건너뛰지 않는다 — 임베드가 막힌 영상 하나로 그 곡을 모든 목록에서
+              // 영영 잃는다. Provider가 그 곡만 미리듣기로 떨어뜨린다
+              onError={reportYoutubeError}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setVideoExpanded(false)}
+            className="w-full cursor-pointer py-1.5 text-xs text-white/50 transition hover:bg-white/10 hover:text-white"
+          >
+            영상 접기 (재생이 멈춥니다)
+          </button>
+        </div>
+      )}
+
+      {/* 펼치기는 toggle에만 맡긴다 — 여기서 setVideoExpanded(true)를 먼저 부르면,
+          무대가 아직 다시 서는 중일 때 패널만 펼쳐진 채 이 버튼이 사라져 되돌릴 길이 없다.
+          toggle은 손잡이가 있으면 펼치며 재생하고, 없으면 곡을 다시 요청해 둔다.
+          어느 쪽이든 소리가 실제로 나기 시작할 때 비로소 펼쳐지므로 이 버튼도 그때 사라진다 */}
+      {engine === "youtube" && !videoExpanded && (
+        <button
+          type="button"
+          onClick={toggle}
+          className="mb-2 w-full cursor-pointer rounded-full border border-white/15 bg-black/80 py-1.5 text-xs text-white/70 backdrop-blur transition hover:bg-white/10"
+        >
+          영상 펼치고 이어 듣기
+        </button>
+      )}
+
+      {/* 재생 방식이 바뀐 이유 한 줄 — 영상이 계속 실패해 미리듣기로 내려온 경우 */}
+      {notice && (
+        <p className="mb-2 w-full rounded-2xl border border-amber-200/25 bg-black/80 px-3 py-1.5 text-center text-[11px] text-amber-100/80 backdrop-blur">
+          {notice}
+        </p>
       )}
 
       {/* 알약 본체 */}
@@ -277,6 +373,19 @@ export default function MiniPlayer() {
             title={auth.authenticated ? "좋아요" : "로그인하고 좋아요"}
           >
             {auth.likedIds.has(playingId) ? "♥" : "♡"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setExpanded(false); // 재생 목록과 겹치지 않게
+              setAddOpen((v) => !v);
+            }}
+            className="grid h-8 w-8 cursor-pointer place-items-center rounded-full border border-white/20 bg-white/10 text-sm text-white/70 transition hover:bg-white/20"
+            aria-label="목록에 담기"
+            aria-expanded={addOpen}
+            title="목록에 담기"
+          >
+            +
           </button>
           <button
             type="button"

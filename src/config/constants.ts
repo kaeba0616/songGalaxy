@@ -42,6 +42,39 @@ export const AUDIO_FEATURE_KEYS = [
 /** 신곡을 놓을 때 참고할 이웃 곡 수 (특징 공간 최근접) */
 export const PLACEMENT_NEIGHBORS = 8;
 
+/**
+ * YouTube 무대가 준비되기를 기다리는 한도(ms).
+ * IFrame API 스크립트를 내려받고 플레이어가 onReady를 알릴 때까지의 창을 덮는다 —
+ * 이 시간이 지나도 무대가 없으면 요청을 버리고 호출부에 실패를 알린다.
+ */
+export const YT_STAGE_READY_TIMEOUT_MS = 10_000;
+
+/**
+ * 영상 오류 폭주 차단 — 이 창(ms) 안에 오류가 이만큼 쌓이면 목록 전체를 미리듣기로 내린다.
+ * 오류 → 다음 곡 → 오류가 iframe 로드 속도로 목록 전체를 태우는 것을 막는다.
+ */
+export const YT_ERROR_WINDOW_MS = 15_000;
+export const YT_ERROR_LIMIT = 3;
+
+/**
+ * 한 곡에서 일시적 재생 오류("playback")를 이만큼 만나면 그 곡의 영상을 이 큐에서 포기한다.
+ * 위의 폭주 차단은 창(15초) 안에 몰린 오류만 잡아서, 재생 도중 드문드문 나는 오류(코드 5 등)는
+ * 영원히 걸리지 않는다 — 그 경우 같은 곡이 처음부터 계속 다시 시작된다.
+ * 1이면 한 번 튄 것만으로 멀쩡한 영상을 버리므로, "한 번은 다시 시도"에 해당하는 2로 둔다.
+ */
+export const YT_PLAYBACK_ERROR_LIMIT = 2;
+
+/**
+ * 한 사용자가 하루(UTC 날짜 기준)에 태울 수 있는 YouTube 검색 횟수.
+ * 서비스 전체 무료 쿼터가 하루 100회(검색 1회 = 100유닛)라 한 사람이 다 쓰면
+ * 나머지 사용자 전원이 그날 영상을 못 찾는다.
+ * 소비량은 `youtube_lookups` 테이블에 쌓인다 — 실패한 조회도 쿼터를 먹으므로 함께 센다.
+ */
+export const YOUTUBE_LOOKUPS_PER_USER_PER_DAY = 20;
+
+/** 목록 상세를 열 때 "아직 못 찾은 곡"을 다시 찾아보는 최대 곡 수 (한 번의 열람당) */
+export const YOUTUBE_LOOKUP_RETRY_MAX = 3;
+
 /** 행성 프로필 — 닉네임 최대 길이 */
 export const NICKNAME_MAX = 20;
 /** 행성 프로필 — 한 줄 소개 최대 길이 */

@@ -484,13 +484,17 @@ export default function GalaxyCanvas({
    * 은하 화면에 들어온 순간, 재생 중인 목록을 카드 캐러셀로 되살린다.
    * (다른 페이지에서 돌아왔을 때 알약 대신 캐러셀로 보여주기 위함)
    * 진입당 한 번만 — 그러지 않으면 사용자가 ✕로 닫는 즉시 다시 열려버린다.
+   *
+   * 단, **노래 목록 재생(mode: "playlist")은 카드로 옮기지 않는다**. 카드 캐러셀은
+   * 30초 미리듣기 전용 UI이고, 이걸 띄우면 알약이 내려가면서 YouTube 무대까지 무너져
+   * 전곡 재생이 미리듣기 목록으로 바뀐다. 목록 재생 중에는 알약(과 영상)을 그대로 둔다.
    */
   const cardsRestored = useRef(false);
   useEffect(() => {
     if (status !== "ready" || cardsRestored.current) return;
     cardsRestored.current = true;
     const { queue: q, playingId: pid } = playingMirror.current;
-    if (!q || pid === null) return;
+    if (!q || pid === null || q.mode === "playlist") return;
     showCards(toCards(q));
   }, [status, toCards, showCards]);
 
@@ -1392,7 +1396,10 @@ export default function GalaxyCanvas({
       galaxySnapshot.current = null;
       if (snap) {
         void playerApiRef.current.restore(snap);
-        showCards(snap.queue ? toCardsRef.current(snap.queue) : null);
+        // 목록 재생은 카드로 옮기지 않는다 — 옮기면 알약과 영상 무대가 내려가
+        // 전곡 재생이 30초 미리듣기 캐러셀로 바뀐다 (위 복원 이펙트와 같은 이유)
+        const q = snap.queue;
+        showCards(q && q.mode !== "playlist" ? toCardsRef.current(q) : null);
       } else {
         playerApiRef.current.stop();
         showCards(null);
@@ -2060,10 +2067,12 @@ export default function GalaxyCanvas({
 
       {/* 우측 드로어 — 메뉴 + 행성 프로필 편집 */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-20 bg-black/50" onClick={() => setDrawerOpen(false)} />
+        /* 알약(z-40)보다 위에 깔아야 한다 — 목록 재생 중에는 알약이 영상 패널만큼 커져
+           드로어를 덮고, 그러면 메뉴 항목이 눌리지 않는다 */
+        <div className="fixed inset-0 z-[45] bg-black/50" onClick={() => setDrawerOpen(false)} />
       )}
       <aside
-        className={`fixed right-0 top-0 z-30 flex h-dvh w-80 max-w-[85vw] transform flex-col overflow-y-auto border-l border-white/15 bg-black/90 p-5 backdrop-blur transition-transform duration-300 ${drawerOpen ? "translate-x-0" : "translate-x-full"}`}
+        className={`fixed right-0 top-0 z-50 flex h-dvh w-80 max-w-[85vw] transform flex-col overflow-y-auto border-l border-white/15 bg-black/90 p-5 backdrop-blur transition-transform duration-300 ${drawerOpen ? "translate-x-0" : "translate-x-full"}`}
         aria-hidden={!drawerOpen}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -2183,6 +2192,14 @@ export default function GalaxyCanvas({
             className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
           >
             ♪ 곡 목록
+          </Link>
+          {/* 알약의 +로 만든 목록을 열고·재생하고·공유하는 유일한 입구.
+              /me와 같은 자리에 둔다 — 로그인 전에도 보이게 해서 무엇이 있는지 알린다 */}
+          <Link
+            href="/lists"
+            className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+          >
+            ≡ 내 노래 목록
           </Link>
           <div className="my-1 border-t border-white/10" />
           {skyInfo ? (

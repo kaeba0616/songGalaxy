@@ -140,17 +140,59 @@ async function fetchTopTracks(artist: string, limit: number): Promise<LastfmTrac
  * (예: tuki. — 데이터셋이 2022년 스냅샷이라 2023년 데뷔 가수는 1곡뿐이었다).
  * 같은 조건이면 대표곡 인기도가 높은 가수를 먼저 본다.
  */
+/**
+ * 국적이 장르 이름에 박혀 있는 장르 → 그 국가 코드.
+ *
+ * 이 장르를 물려주려면 가수 국적이 맞아야 한다. 원본 데이터셋에 잘못 라벨링된
+ * 가수가 있었고(실측: Norah Jones·Michael Bublé가 j-pop, Vybz Kartel이 j-dance),
+ * 확장이 "그 가수의 기존 곡에서 장르를 물려받는" 규칙을 쓰는 탓에 틀린 씨앗 하나가
+ * 그 가수의 새 곡으로 계속 번졌다. 여기서 끊는다.
+ * 정정 이력: scripts/fix-genre-mislabel.ts
+ */
+const NATIONALITY_GENRES: Record<string, string> = {
+  "j-pop": "JP",
+  "j-rock": "JP",
+  "j-idol": "JP",
+  "j-dance": "JP",
+  "k-pop": "KR",
+  turkish: "TR",
+  french: "FR",
+  german: "DE",
+  swedish: "SE",
+  spanish: "ES",
+  brazil: "BR",
+  indian: "IN",
+  iranian: "IR",
+  malay: "MY",
+};
+
 async function pickArtists(
   limit: number,
   minPopularity: number,
 ): Promise<{ artist: string; genre: string }[]> {
+  const pairs = Object.entries(NATIONALITY_GENRES)
+    .map(([g, c]) => `('${g}','${c}')`)
+    .join(",");
   const rows = await db.execute<{ artist: string; genre: string }>(sql`
-    SELECT artist, mode() WITHIN GROUP (ORDER BY genre) AS genre
-    FROM songs
-    WHERE pos_x IS NOT NULL
-    GROUP BY artist
-    HAVING max(popularity) >= ${minPopularity}
-    ORDER BY count(*) ASC, max(popularity) DESC, artist
+    WITH per AS (
+      SELECT artist,
+             mode() WITHIN GROUP (ORDER BY genre) AS genre,
+             count(*) AS n,
+             max(popularity) AS pop
+      FROM songs
+      WHERE pos_x IS NOT NULL
+      GROUP BY artist
+      HAVING max(popularity) >= ${minPopularity}
+    ),
+    nat(genre, country) AS (VALUES ${sql.raw(pairs)})
+    SELECT p.artist, p.genre
+    FROM per p
+    LEFT JOIN nat n ON n.genre = p.genre
+    LEFT JOIN artists a ON a.name = p.artist
+    -- 국적이 박힌 장르인데 MusicBrainz 국가가 어긋나면 건너뛴다.
+    -- 국가를 모르면(캐시 없음) 막지 않는다 — 정보 부족으로 확장을 멈추진 않는다
+    WHERE n.country IS NULL OR a.country IS NULL OR a.country = n.country
+    ORDER BY p.n ASC, p.pop DESC, p.artist
     LIMIT ${limit}
   `);
   return rows.rows;

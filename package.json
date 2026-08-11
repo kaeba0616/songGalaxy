@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "tsx --test $(find src -name \"*.test.ts\")",
     "db:up": "docker compose up -d",
     "db:push": "drizzle-kit push",
     "ingest": "tsx --env-file=.env scripts/ingest-dataset.ts",

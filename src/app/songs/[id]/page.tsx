@@ -8,13 +8,16 @@ import LikeButton from "@/components/LikeButton";
 import { enrichSongs } from "@/server/enrich";
 import { getArtistInfo } from "@/server/artist-info";
 import { getLyrics } from "@/server/lyrics";
-import { getYoutubeVideoId } from "@/server/youtube";
 
 export const dynamic = "force-dynamic";
 
 /**
  * 곡 상세 페이지 — 메타데이터 + 가수 정보(MusicBrainz) + YouTube 재생 + 가사(LRCLIB).
- * YouTube는 검색 재생목록 임베드(listType=search)를 사용해 API 키 없이 영상을 튼다.
+ *
+ * YouTube 영상은 **이미 캐시된 ID가 있을 때만** 임베드한다. 여기서 `getYoutubeVideoId`를
+ * 부르면 안 된다: 이 페이지는 force-dynamic이고 공개(공유 목록에서 곡마다 링크된다)라
+ * 크롤러가 링크를 따라오는 것만으로 하루 100회 검색 쿼터가 통째로 마른다.
+ * 영상 ID를 새로 찾는 곳은 목록에 담을 때와 소유자가 목록을 열 때뿐이다 (docs/SSOT.md).
  */
 export default async function SongDetailPage(props: { params: Promise<{ id: string }> }) {
   const { id } = await props.params;
@@ -32,11 +35,11 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
     : [undefined];
 
   const user = await getSessionUser();
-  const [media, artist, lyrics, videoId, [likeCount], myLike] = await Promise.all([
+  const videoId = song.youtubeVideoId; // 캐시된 것만 — 새로 찾지 않는다 (위 주석)
+  const [media, artist, lyrics, [likeCount], myLike] = await Promise.all([
     enrichSongs([songId]).then((m) => m[songId]),
     getArtistInfo(song.artist, song.genre),
     getLyrics(songId),
-    getYoutubeVideoId(songId),
     db
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.likes)
@@ -144,7 +147,7 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
               <span>
                 <span className="block text-sm">YouTube에서 &ldquo;{song.title} {song.artist}&rdquo; 검색하기</span>
                 <span className="block text-xs text-white/40">
-                  YOUTUBE_API_KEY를 설정하면 영상이 이 자리에 바로 재생됩니다
+                  이 곡을 노래 목록에 담으면 영상을 찾아 다음부터 이 자리에서 바로 재생됩니다
                 </span>
               </span>
             </a>
