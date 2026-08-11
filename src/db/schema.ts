@@ -149,7 +149,9 @@ export const userStars = pgTable("user_stars", {
 /** 사용자가 만든 노래 목록. share_slug가 있으면 그 slug를 아는 누구나 열람 가능 */
 export const playlists = pgTable("playlists", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   /** NULL이면 비공개. 값이 있으면 /list/[slug]로 열람 가능 */
   shareSlug: text("share_slug").unique(),
@@ -164,8 +166,12 @@ export const playlists = pgTable("playlists", {
 export const playlistSongs = pgTable(
   "playlist_songs",
   {
-    playlistId: integer("playlist_id").notNull(),
-    songId: integer("song_id").notNull(),
+    playlistId: integer("playlist_id")
+      .notNull()
+      .references(() => playlists.id, { onDelete: "cascade" }),
+    songId: integer("song_id")
+      .notNull()
+      .references(() => songs.id, { onDelete: "cascade" }),
     position: integer("position").notNull(),
     addedAt: timestamp("added_at").notNull().defaultNow(),
   },

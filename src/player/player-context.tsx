@@ -502,7 +502,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (song) {
           const m = mediaRef.current[song.id];
           void playSong(song, m?.previewUrl ?? null, q?.mode ?? "browse").catch(() => undefined);
+          return;
         }
+        // 지금 재생 중이라던 곡이 이 큐에 없다 — 다시 요청할 재료(영상 ID 등)가 없어
+        // 여기서 되살릴 수 없는 진짜 막다른 길이다. 재생 상태를 비워 재생 버튼을 풀어준다
+        // (advanceRef가 "재생 가능한 곡이 하나도 없음"일 때 쓰는 것과 같은 처리)
+        setPlayingId(null);
         return;
       }
       if (isPausedRef.current) {

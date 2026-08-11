@@ -5,6 +5,16 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import type { PlaylistSummary } from "@/server/playlists";
 
+/**
+ * 서버 에러 메시지를 화면에 찍기 전 실제로 문자열인지 런타임에 확인한다.
+ * 지금은 모든 라우트가 문자열 리터럴만 주지만, `as { error?: string }` 캐스팅만으로는
+ * 그걸 강제하지 못한다 — 문자열이 아닌 값이 와도 그대로 JSX에 박힐 수 있다.
+ */
+function serverError(j: unknown, fallback: string): string {
+  const msg = j && typeof j === "object" ? (j as Record<string, unknown>).error : undefined;
+  return typeof msg === "string" ? msg : fallback;
+}
+
 export default function PlaylistManager({ initial }: { initial: PlaylistSummary[] }) {
   const [items, setItems] = useState(initial);
   const [name, setName] = useState("");
@@ -38,7 +48,7 @@ export default function PlaylistManager({ initial }: { initial: PlaylistSummary[
       });
       const j = (await r.json().catch(() => null)) as { playlist?: PlaylistSummary; error?: string } | null;
       if (!r.ok || !j?.playlist) {
-        setError(j?.error ?? "목록을 만들지 못했어요");
+        setError(serverError(j, "목록을 만들지 못했어요"));
         return;
       }
       setItems((p) => [j.playlist as PlaylistSummary, ...p]);
@@ -65,8 +75,8 @@ export default function PlaylistManager({ initial }: { initial: PlaylistSummary[
         body: JSON.stringify({ name: trimmed }),
       });
       if (!r.ok) {
-        const j = (await r.json().catch(() => null)) as { error?: string } | null;
-        setError(j?.error ?? "이름을 바꾸지 못했어요");
+        const j = await r.json().catch(() => null);
+        setError(serverError(j, "이름을 바꾸지 못했어요"));
         return;
       }
       setItems((prev) => prev.map((x) => (x.id === p.id ? { ...x, name: trimmed } : x)));
@@ -88,8 +98,8 @@ export default function PlaylistManager({ initial }: { initial: PlaylistSummary[
         body: JSON.stringify({ shared: p.shareSlug === null }),
       });
       if (!r.ok) {
-        const j = (await r.json().catch(() => null)) as { error?: string } | null;
-        setError(j?.error ?? "공유 설정을 바꾸지 못했어요");
+        const j = await r.json().catch(() => null);
+        setError(serverError(j, "공유 설정을 바꾸지 못했어요"));
         return;
       }
       const j = (await r.json()) as { shareSlug: string | null };
@@ -110,8 +120,8 @@ export default function PlaylistManager({ initial }: { initial: PlaylistSummary[
     try {
       const r = await fetch(`/api/playlists/${id}`, { method: "DELETE" });
       if (!r.ok) {
-        const j = (await r.json().catch(() => null)) as { error?: string } | null;
-        setError(j?.error ?? "삭제하지 못했어요");
+        const j = await r.json().catch(() => null);
+        setError(serverError(j, "삭제하지 못했어요"));
         return;
       }
       setItems((prev) => prev.filter((x) => x.id !== id));

@@ -121,9 +121,10 @@ export async function setPlaylistShared(
 }
 
 /**
- * 목록 삭제 + 담긴 곡 행 정리를 한 트랜잭션으로 묶는다 —
- * FK 제약이 없어(스키마 참고) 두 statement를 따로 실행하면 연결이 중간에 끊길 때
- * playlist_songs에 죽은 playlist_id를 가리키는 고아 행이 남을 수 있다.
+ * 목록 삭제 + 담긴 곡 행 정리를 한 트랜잭션으로 묶는다.
+ * 이제 playlist_songs.playlist_id에 ON DELETE CASCADE FK가 있어(스키마 참고) DB가
+ * 고아 행을 막아주지만, 이 트랜잭션은 그대로 둔다 — 두 statement 사이에 연결이
+ * 끊기면 "목록은 지워졌는데 곡 행만 남는" 반쪽 상태를 여기서도 막아준다(이중 방어).
  */
 export async function deletePlaylist(userId: number, id: number): Promise<boolean> {
   return db.transaction(async (tx) => {
@@ -210,10 +211,9 @@ export async function addSongToPlaylist(
     .where(eq(schema.playlistSongs.playlistId, playlistId));
   if (existing.some((e) => e.songId === songId)) return "already";
 
-  // playlist_songs.song_id에는 FK가 없다(스키마 참고) — 확인 없이 insert하면
-  // 존재하지 않는 songId가 영구히 박혀서 loadDetail의 join에서는 조용히 빠지는데
-  // listMyPlaylists의 songCount는 raw 행을 세므로 목록에 안 보이는 곡만큼 개수가
-  // 영영 어긋난다. SSOT를 지키려면 같은 songs 테이블을 insert 전에 확인해야 한다.
+  // playlist_songs.song_id에 ON DELETE CASCADE FK가 생겨(스키마 참고) 존재하지 않는
+  // songId로 insert하면 이제 DB가 제약 위반으로 거부한다. 그래도 여기서 미리 확인하는
+  // 이유는 그 거부를 500으로 흘려보내지 않고 깔끔한 "nosong" 400으로 답하기 위해서다.
   const [song] = await db
     .select({ id: schema.songs.id })
     .from(schema.songs)
