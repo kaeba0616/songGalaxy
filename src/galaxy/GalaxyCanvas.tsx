@@ -2226,13 +2226,15 @@ export default function GalaxyCanvas({
               </button>
             </>
           ) : (
+            /* 데스크톱에는 우측 상단에 같은 버튼이 있어 중복이다.
+               모바일은 상단 버튼이 sm:flex로 숨겨져 드로어가 유일한 통로이므로 거기서만 보인다 */
             <button
               type="button"
               onClick={() => {
                 setDrawerOpen(false);
                 resetRef.current?.();
               }}
-              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white sm:hidden"
             >
               🔭 전체 보기
             </button>
