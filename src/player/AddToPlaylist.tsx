@@ -14,12 +14,19 @@ interface Item {
   songCount: number;
 }
 
+/** 알약 위에 띄울 때의 자리 — 알약 폭을 그대로 쓰고 위로 펼친다 */
+const PANEL_ABOVE_FULL =
+  "absolute bottom-full left-0 mb-2 w-full rounded-2xl border border-white/15 bg-black/90 p-3 text-sm text-white shadow-xl backdrop-blur";
+
 export default function AddToPlaylist({
   songId,
   onClose,
+  panelClassName = PANEL_ABOVE_FULL,
 }: {
   songId: number;
   onClose: () => void;
+  /** 붙는 자리는 부르는 쪽이 정한다 — 알약과 목록 행은 폭도 방향도 다르다 */
+  panelClassName?: string;
 }) {
   const [items, setItems] = useState<Item[] | null>(null);
   const [authed, setAuthed] = useState(true);
@@ -135,10 +142,7 @@ export default function AddToPlaylist({
   };
 
   return (
-    <div
-      data-nodrag
-      className="absolute bottom-full left-0 mb-2 w-full rounded-2xl border border-white/15 bg-black/90 p-3 text-sm text-white shadow-xl backdrop-blur"
-    >
+    <div data-nodrag className={panelClassName}>
       {done ? (
         <p className="py-2 text-center text-white/70">{done}</p>
       ) : !authed ? (

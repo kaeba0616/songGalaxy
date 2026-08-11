@@ -2,6 +2,7 @@ import Link from "next/link";
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
+import AddToPlaylistButton from "@/components/AddToPlaylistButton";
 import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits from "@/components/DataCredits";
 import { searchExternal } from "@/server/import-song";
@@ -168,13 +169,14 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
 
         <p className="mb-3 text-xs text-white/40">{total.toLocaleString()}곡</p>
 
-        {/* 곡 목록 */}
+        {/* 곡 목록 — 담기 버튼은 Link 밖 형제로 둔다.
+            링크 안에 버튼을 넣으면 버튼을 눌러도 곡 상세로 같이 이동한다 */}
         <ul className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
           {rows.map((song) => (
-            <li key={song.id}>
+            <li key={song.id} className="flex items-center gap-3 px-4 py-3 transition hover:bg-white/5">
               <Link
                 href={`/songs/${song.id}`}
-                className="flex items-center gap-4 px-4 py-3 transition hover:bg-white/5"
+                className="flex min-w-0 flex-1 items-center gap-4"
               >
                 <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/5">
                   {song.artworkUrl ? (
@@ -192,6 +194,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
                   {song.genre}
                 </span>
               </Link>
+              <AddToPlaylistButton songId={song.id} />
             </li>
           ))}
           {rows.length === 0 && (
