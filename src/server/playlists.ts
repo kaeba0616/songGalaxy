@@ -1,6 +1,8 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { generateShareSlug } from "@/lib/share-slug";
+import { nextPosition } from "@/player/engine";
+import { getYoutubeVideoId } from "@/server/youtube";
 
 /** 목록 한 줄 요약 — 곡 개수는 저장하지 않고 매번 센다 (SSOT) */
 export interface PlaylistSummary {
@@ -132,4 +134,123 @@ export async function deletePlaylist(userId: number, id: number): Promise<boolea
     await tx.delete(schema.playlistSongs).where(eq(schema.playlistSongs.playlistId, id));
     return true;
   });
+}
+
+export interface PlaylistTrack {
+  id: number;
+  title: string;
+  artist: string;
+  genre: string;
+  youtubeVideoId: string | null;
+}
+
+export interface PlaylistDetail {
+  id: number;
+  name: string;
+  shareSlug: string | null;
+  ownerId: number;
+  songs: PlaylistTrack[];
+}
+
+/** 내 목록인지 확인 */
+async function ownsPlaylist(userId: number, playlistId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ id: schema.playlists.id })
+    .from(schema.playlists)
+    .where(and(eq(schema.playlists.id, playlistId), eq(schema.playlists.userId, userId)));
+  return row != null;
+}
+
+/**
+ * 목록에 곡을 담는다.
+ *
+ * 여기가 YouTube 영상 ID를 찾는 **유일한 지점**이다. 탐색·재생 경로에서 부르면
+ * 하루 100회 검색 쿼터가 순식간에 마른다. getYoutubeVideoId는 이미 캐시를 보므로
+ * 이미 찾아둔 곡이면 외부 호출이 나가지 않는다.
+ * 조회에 실패해도 담기는 성공시킨다 — 그 곡만 미리듣기로 재생되고,
+ * 영상은 다음에 다시 시도된다.
+ */
+export async function addSongToPlaylist(
+  userId: number,
+  playlistId: number,
+  songId: number,
+): Promise<"added" | "already" | "forbidden"> {
+  if (!(await ownsPlaylist(userId, playlistId))) return "forbidden";
+
+  const existing = await db
+    .select({ songId: schema.playlistSongs.songId, position: schema.playlistSongs.position })
+    .from(schema.playlistSongs)
+    .where(eq(schema.playlistSongs.playlistId, playlistId));
+  if (existing.some((e) => e.songId === songId)) return "already";
+
+  await db.insert(schema.playlistSongs).values({
+    playlistId,
+    songId,
+    position: nextPosition(existing.map((e) => e.position)),
+  });
+  await db
+    .update(schema.playlists)
+    .set({ updatedAt: new Date() })
+    .where(eq(schema.playlists.id, playlistId));
+
+  await getYoutubeVideoId(songId).catch(() => null);
+  return "added";
+}
+
+export async function removeSongFromPlaylist(
+  userId: number,
+  playlistId: number,
+  songId: number,
+): Promise<boolean> {
+  if (!(await ownsPlaylist(userId, playlistId))) return false;
+  await db
+    .delete(schema.playlistSongs)
+    .where(
+      and(
+        eq(schema.playlistSongs.playlistId, playlistId),
+        eq(schema.playlistSongs.songId, songId),
+      ),
+    );
+  await db
+    .update(schema.playlists)
+    .set({ updatedAt: new Date() })
+    .where(eq(schema.playlists.id, playlistId));
+  return true;
+}
+
+/** 목록 + 담긴 곡 (position 순). 열람 권한 판단은 호출부가 한다 */
+async function loadDetail(where: SQL): Promise<PlaylistDetail | null> {
+  const [pl] = await db
+    .select({
+      id: schema.playlists.id,
+      name: schema.playlists.name,
+      shareSlug: schema.playlists.shareSlug,
+      ownerId: schema.playlists.userId,
+    })
+    .from(schema.playlists)
+    .where(where);
+  if (!pl) return null;
+
+  const songs = await db
+    .select({
+      id: schema.songs.id,
+      title: schema.songs.title,
+      artist: schema.songs.artist,
+      genre: schema.songs.genre,
+      youtubeVideoId: schema.songs.youtubeVideoId,
+    })
+    .from(schema.playlistSongs)
+    .innerJoin(schema.songs, eq(schema.songs.id, schema.playlistSongs.songId))
+    .where(eq(schema.playlistSongs.playlistId, pl.id))
+    .orderBy(schema.playlistSongs.position);
+
+  return { ...pl, songs };
+}
+
+export function getPlaylistById(id: number): Promise<PlaylistDetail | null> {
+  return loadDetail(eq(schema.playlists.id, id));
+}
+
+export function getPlaylistBySlug(slug: string): Promise<PlaylistDetail | null> {
+  return loadDetail(eq(schema.playlists.shareSlug, slug));
 }
