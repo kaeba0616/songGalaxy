@@ -29,6 +29,9 @@ export async function POST(
   if (result === "forbidden") {
     return NextResponse.json({ error: "내 목록이 아닙니다" }, { status: 403 });
   }
+  if (result === "nosong") {
+    return NextResponse.json({ error: "존재하지 않는 곡입니다" }, { status: 400 });
+  }
   return NextResponse.json({ ok: true, already: result === "already" });
 }
 

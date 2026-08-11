@@ -169,12 +169,15 @@ async function ownsPlaylist(userId: number, playlistId: number): Promise<boolean
  * 이미 찾아둔 곡이면 외부 호출이 나가지 않는다.
  * 조회에 실패해도 담기는 성공시킨다 — 그 곡만 미리듣기로 재생되고,
  * 영상은 다음에 다시 시도된다.
+ *
+ * "already"·"nosong" 둘 다 insert보다 먼저 반환한다 — 어느 경우든 실제로
+ * 새로 담기는 일이 없으므로 아래 getYoutubeVideoId 호출까지 가면 안 된다.
  */
 export async function addSongToPlaylist(
   userId: number,
   playlistId: number,
   songId: number,
-): Promise<"added" | "already" | "forbidden"> {
+): Promise<"added" | "already" | "forbidden" | "nosong"> {
   if (!(await ownsPlaylist(userId, playlistId))) return "forbidden";
 
   const existing = await db
@@ -183,11 +186,30 @@ export async function addSongToPlaylist(
     .where(eq(schema.playlistSongs.playlistId, playlistId));
   if (existing.some((e) => e.songId === songId)) return "already";
 
-  await db.insert(schema.playlistSongs).values({
-    playlistId,
-    songId,
-    position: nextPosition(existing.map((e) => e.position)),
-  });
+  // playlist_songs.song_id에는 FK가 없다(스키마 참고) — 확인 없이 insert하면
+  // 존재하지 않는 songId가 영구히 박혀서 loadDetail의 join에서는 조용히 빠지는데
+  // listMyPlaylists의 songCount는 raw 행을 세므로 목록에 안 보이는 곡만큼 개수가
+  // 영영 어긋난다. SSOT를 지키려면 같은 songs 테이블을 insert 전에 확인해야 한다.
+  const [song] = await db
+    .select({ id: schema.songs.id })
+    .from(schema.songs)
+    .where(eq(schema.songs.id, songId));
+  if (!song) return "nosong";
+
+  // existing 조회와 insert 사이에 같은 곡이 두 번(더블탭 등) 거의 동시에 들어오면
+  // 둘 다 위의 already 검사를 통과할 수 있다 — onConflictDoNothing으로 나중 것을
+  // 조용히 무시하고, 실제로 삽입됐는지(returning)로 결과를 가른다.
+  const inserted = await db
+    .insert(schema.playlistSongs)
+    .values({
+      playlistId,
+      songId,
+      position: nextPosition(existing.map((e) => e.position)),
+    })
+    .onConflictDoNothing({ target: [schema.playlistSongs.playlistId, schema.playlistSongs.songId] })
+    .returning({ songId: schema.playlistSongs.songId });
+  if (inserted.length === 0) return "already"; // 경쟁에서 진 요청 — 사용자에게는 순차 중복과 같은 결과
+
   await db
     .update(schema.playlists)
     .set({ updatedAt: new Date() })
