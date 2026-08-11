@@ -166,6 +166,24 @@ async function ownsPlaylist(userId: number, playlistId: number): Promise<boolean
 }
 
 /**
+ * 이 사용자의 목록 어딘가에 이 곡이 담겨 있는지 — "영상이 안 튼다"는 신고를 받아줄 권한의
+ * 근거다. `youtube_video_id`는 공개 `/songs/[id]` 페이지 HTML에 그대로 노출되므로, 로그인만
+ * 요구하면 아무 구글 계정이나 곡 id를 순회해 사이트 전체의 캐시를 지울 수 있었다(그리고
+ * `youtube_checked_at`은 남아 재검색 경로가 없어 복구가 SQL 수작업뿐이었다). 신고는 실제로
+ * 그 곡을 목록에 담아 재생을 시도한 사람만 할 수 있다고 좁힌다 — 목록에 없는 사람이 보낸
+ * 신고는 거부되어야 정상이고(다른 사람의 공유 목록을 보는 비소유자는 신고를 못 보내지만,
+ * 클라이언트가 어차피 그 자리에서 미리듣기로 넘어가므로 해가 없다).
+ */
+export async function songInUsersPlaylist(userId: number, songId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ songId: schema.playlistSongs.songId })
+    .from(schema.playlistSongs)
+    .innerJoin(schema.playlists, eq(schema.playlists.id, schema.playlistSongs.playlistId))
+    .where(and(eq(schema.playlists.userId, userId), eq(schema.playlistSongs.songId, songId)));
+  return row != null;
+}
+
+/**
  * 이 사용자가 직전 24시간에 태운 영상 검색 횟수(근사).
  *
  * 별도 집계 테이블을 두지 않는다 — 검색이 일어나면 `songs.youtube_checked_at`이 찍히므로
