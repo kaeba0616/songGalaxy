@@ -28,6 +28,23 @@ const EMPTY: Media = { artworkUrl: null, previewUrl: null };
  */
 const EMPTY_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Deezer의 미리듣기 URL은 서명이 붙은 한시적 링크다. 만료되면 403을 준다.
+ *
+ * 실측(2026-08-11): 캐시된 Deezer URL 15건이 전부 403인데, 같은 곡을 그 자리에서
+ * 다시 검색해 받은 URL은 200에 audio/mpeg 480KB였다. 브라우저 UA와 Referer를 붙여도
+ * 캐시된 쪽은 그대로 403이었으므로 우리 요청 방식이나 IP 문제가 아니라 만료가 맞다.
+ *
+ * 만료된 링크를 그대로 내보내면 재생 버튼은 멀쩡히 보이는데 누르면 즉시 끊긴다.
+ * 그래서 이 호스트의 미리듣기만은 캐시를 믿지 않고 읽을 때마다 새로 받는다.
+ * 앨범아트는 호스트가 다르고(`cdn-images.dzcdn.net`) 만료되지 않으므로
+ * (실측 10/10 정상) 그대로 캐시한다.
+ */
+const EPHEMERAL_PREVIEW_HOST = "cdnt-preview.dzcdn.net";
+
+const isEphemeralPreview = (url: string | null | undefined): boolean =>
+  typeof url === "string" && url.includes(EPHEMERAL_PREVIEW_HOST);
+
 const looselyEqual = (a: string, b: string) =>
   !!a && !!b && (a === b || a.includes(b) || b.includes(a));
 
@@ -151,6 +168,8 @@ export async function enrichSongs(ids: number[]): Promise<Record<number, Media>>
     .where(inArray(schema.songs.id, ids));
 
   const result: Record<number, Media> = {};
+  /** 캐시로 응답한 곡 — 만료되는 미리듣기라면 아래에서 새 링크로 갈아끼운다 */
+  const servedFromCache: typeof rows = [];
   for (const row of rows) {
     // 하나라도 건진 캐시는 그대로 쓰고, 통째로 빈 캐시는 유예 기간이 지나면 다시 조회한다
     const cached =
@@ -159,6 +178,7 @@ export async function enrichSongs(ids: number[]): Promise<Record<number, Media>>
       Date.now() - (row.enrichedAt?.getTime() ?? 0) < EMPTY_RETRY_MS;
     if (row.enrichedAt && cached) {
       result[row.id] = { artworkUrl: row.artworkUrl, previewUrl: row.previewUrl };
+      servedFromCache.push(row);
       continue;
     }
 
@@ -185,6 +205,19 @@ export async function enrichSongs(ids: number[]): Promise<Record<number, Media>>
       .set({ artworkUrl: media.artworkUrl, previewUrl: media.previewUrl, enrichedAt: new Date() })
       .where(inArray(schema.songs.id, [row.id]));
     result[row.id] = media;
+  }
+
+  /**
+   * 캐시로 응답한 곡 중 만료되는 미리듣기는 새 링크로 갈아끼운다.
+   * 새로 못 받으면 null로 둔다 — 죽은 링크로 재생 버튼을 띄우느니 없는 게 낫다.
+   * 방금 조회한 곡은 이미 새 링크라 건너뛴다.
+   */
+  const stale = servedFromCache.filter((r) => isEphemeralPreview(r.previewUrl));
+  if (stale.length > 0) {
+    const fresh = await Promise.all(stale.map((r) => fromDeezer(r.title, r.artist)));
+    stale.forEach((r, i) => {
+      result[r.id] = { ...result[r.id], previewUrl: fresh[i].media.previewUrl };
+    });
   }
   return result;
 }
