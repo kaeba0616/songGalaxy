@@ -2047,10 +2047,13 @@ export default function GalaxyCanvas({
             onClick={(e) => toggleMenu(e.currentTarget)}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            className="flex items-center gap-2 rounded-full border border-amber-200/30 bg-amber-100/10 py-1 pl-1 pr-3.5 text-sm text-amber-100/90 backdrop-blur transition hover:bg-amber-100/20"
+            /* 사진을 앞세우고 닉네임은 그 아래 작게 — 이름이 길어도 버튼 폭이 흔들리지 않는다 */
+            className="flex w-16 flex-col items-center gap-1 rounded-xl border border-amber-200/30 bg-amber-100/10 px-1.5 py-1.5 backdrop-blur transition hover:bg-amber-100/20"
           >
-            <Avatar src={authState.avatarUrl} nickname={authState.nickname} size={26} />
-            {authState.nickname}
+            <Avatar src={authState.avatarUrl} nickname={authState.nickname} size={30} />
+            <span className="w-full truncate text-center text-[10px] leading-tight text-amber-100/80">
+              {authState.nickname}
+            </span>
           </button>
         ) : (
           <>
@@ -2079,7 +2082,7 @@ export default function GalaxyCanvas({
             </button>
           </>
         )}
-        {skyInfo ? (
+        {skyInfo && (
           <>
             <button
               type="button"
@@ -2098,15 +2101,8 @@ export default function GalaxyCanvas({
               은하로 나가기
             </button>
           </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => resetRef.current?.()}
-            className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
-          >
-            전체 보기
-          </button>
         )}
+        {/* 전체 보기는 여기 두지 않는다 — 계정 드롭다운으로 모아 화면 가장자리를 비웠다 */}
       </div>
 
       {/* 모바일 — 버튼 하나로 같은 드롭다운 열기 */}
@@ -2232,10 +2228,8 @@ export default function GalaxyCanvas({
                 </button>
               </>
             ) : (
-              /* 데스크톱에는 우측 상단에 같은 버튼이 있어 중복이다.
-                 모바일은 그 버튼이 sm:flex로 숨겨져 메뉴가 유일한 통로이므로 거기서만 보인다.
-                 구분선까지 함께 숨겨야 데스크톱에 줄만 덩그러니 남지 않는다 */
-              <div className="sm:hidden">
+              /* 우측 상단에는 두지 않는다 — 화면 가장자리를 비우고 메뉴로 모았다 */
+              <div>
                 <div className="my-1 border-t border-white/10" />
                 <button
                   type="button"
