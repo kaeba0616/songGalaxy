@@ -37,6 +37,8 @@ interface LikesValue {
   toggleLike: (songId: number) => Promise<LikeResult | null>;
   /** 프로필 저장 후 닉네임 갱신 */
   setNickname: (nickname: string) => void;
+  /** 프로필 저장 후 사진 갱신 — 빈 값이면 닉네임 첫 글자로 되돌아간다 */
+  setAvatarUrl: (avatarUrl: string | null) => void;
 }
 
 const LikesContext = createContext<LikesValue | null>(null);
@@ -135,9 +137,13 @@ export function LikesProvider({ children }: { children: React.ReactNode }) {
     setAuth((prev) => ({ ...prev, nickname }));
   }, []);
 
+  const setAvatarUrl = useCallback((avatarUrl: string | null) => {
+    setAuth((prev) => ({ ...prev, avatarUrl }));
+  }, []);
+
   const value = useMemo<LikesValue>(
-    () => ({ auth, toggleLike, setNickname }),
-    [auth, toggleLike, setNickname],
+    () => ({ auth, toggleLike, setNickname, setAvatarUrl }),
+    [auth, toggleLike, setNickname, setAvatarUrl],
   );
 
   return <LikesContext.Provider value={value}>{children}</LikesContext.Provider>;

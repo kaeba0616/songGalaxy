@@ -34,6 +34,13 @@ const SONG_ZOOM_DISTANCE = 16;
 /** 하단 카드 캐러셀에 띄우는 최대 곡 수 (인기순) */
 const CARD_LIMIT = 150;
 
+/** 계정 드롭다운 항목 공통 스타일 — 항목마다 베끼면 한 줄만 어긋나도 티가 난다 */
+const MENU_ITEM =
+  "block w-full px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white";
+/** 같은 항목이지만 금빛 강조 (내 별·은하로 나가기처럼 이동을 뜻하는 것) */
+const MENU_ITEM_ACCENT =
+  "block w-full px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100";
+
 interface CardSong {
   index: number;
   id: number;
@@ -145,7 +152,12 @@ export default function GalaxyCanvas({
   const flyToPosRef = useRef<((x: number, y: number, z: number, dist: number) => void) | null>(null);
   // 로그인·좋아요·내 별 상태의 단일 원본 (SSOT: src/likes/likes-context.tsx).
   // 미니플레이어의 ♥와 같은 상태를 봐야 하므로 컨텍스트에서 받아 쓴다.
-  const { auth: authState, toggleLike: toggleLikeBase, setNickname } = useLikes();
+  const {
+    auth: authState,
+    toggleLike: toggleLikeBase,
+    setNickname,
+    setAvatarUrl,
+  } = useLikes();
   const [toast, setToast] = useState<string | null>(null);
   /** 밤하늘 모드 정보 (착륙 중/완료 시 세팅) — 헤더 전환·정보 패널용 */
   const [skyInfo, setSkyInfo] = useState<PlanetInfo | null>(null);
@@ -187,24 +199,45 @@ export default function GalaxyCanvas({
   }, [cards]);
   /** 포커스된 카드 (별 클릭·재생 이동으로 가운데 정렬된 곡) — 테두리 강조용 */
   const [focusedCardId, setFocusedCardId] = useState<number | null>(null);
-  /** 우측 드로어 (메뉴 + 행성 프로필 편집) 열림 상태 */
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  /** 계정 버튼 아래에 붙는 드롭다운 메뉴 열림 상태 */
+  const [menuOpen, setMenuOpen] = useState(false);
+  /** 메뉴가 붙을 자리 (뷰포트 좌표). 계정 버튼이 데스크톱·모바일 둘이라 누른 버튼을 그때 재는 게 가장 정확하다 */
+  const [menuAnchor, setMenuAnchor] = useState({ top: 56, right: 16 });
+  const toggleMenu = useCallback((btn: HTMLElement) => {
+    const r = btn.getBoundingClientRect();
+    // 오른쪽 끝을 버튼에 맞춘다 (GitHub과 같은 정렬). 화면 밖으로 나가지 않게 최소 8px는 띄운다
+    setMenuAnchor({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+    setMenuOpen((v) => !v);
+  }, []);
+  /** 행성 프로필 편집 드로어 열림 상태 — 이제 메뉴의 "프로필 설정"에서만 열린다 */
+  const [profileOpen, setProfileOpen] = useState(false);
+  // 메뉴는 Escape로도 닫힌다 (드롭다운 관습). 열려 있을 때만 리스너를 단다
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
   /** 드로어 프로필 편집 폼 — 열 때 /api/profile에서 로드 */
   const [profile, setProfile] = useState<{
     nickname: string;
     bio: string;
+    avatarUrl: string;
     pinnedSongId: number | null;
     likedSongs: { id: number; title: string; artist: string }[];
   } | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
   useEffect(() => {
-    if (!drawerOpen || !authState.authenticated || profile) return;
+    if (!profileOpen || !authState.authenticated || profile) return;
     fetch("/api/profile")
       .then((r) => (r.ok ? r.json() : null))
       .then(
         (d: {
           nickname: string;
           bio: string | null;
+          avatarUrl: string | null;
           pinnedSongId: number | null;
           likedSongs: { id: number; title: string; artist: string }[];
         } | null) => {
@@ -212,6 +245,7 @@ export default function GalaxyCanvas({
             setProfile({
               nickname: d.nickname,
               bio: d.bio ?? "",
+              avatarUrl: d.avatarUrl ?? "",
               pinnedSongId: d.pinnedSongId,
               likedSongs: d.likedSongs,
             });
@@ -219,7 +253,7 @@ export default function GalaxyCanvas({
         },
       )
       .catch(() => undefined);
-  }, [drawerOpen, authState.authenticated, profile]);
+  }, [profileOpen, authState.authenticated, profile]);
   const saveProfile = useCallback(async () => {
     if (!profile) return;
     setProfileSaving(true);
@@ -230,14 +264,21 @@ export default function GalaxyCanvas({
         body: JSON.stringify({
           nickname: profile.nickname,
           bio: profile.bio,
+          avatarUrl: profile.avatarUrl,
           pinnedSongId: profile.pinnedSongId,
         }),
       });
-      const d = (await r.json()) as { nickname?: string; error?: string };
+      const d = (await r.json()) as {
+        nickname?: string;
+        avatarUrl?: string | null;
+        error?: string;
+      };
       if (!r.ok) {
         setToast(`⚠ ${d.error ?? "저장에 실패했어요"}`);
       } else {
         if (d.nickname) setNickname(d.nickname);
+        // 서버가 정규화한 값을 그대로 받는다 — 빈 문자열은 null로 돌아와 첫 글자 아바타가 된다
+        if (d.avatarUrl !== undefined) setAvatarUrl(d.avatarUrl);
         setToast("✦ 행성 프로필을 저장했어요");
       }
     } catch {
@@ -246,7 +287,7 @@ export default function GalaxyCanvas({
       setProfileSaving(false);
       setTimeout(() => setToast(null), 2500);
     }
-  }, [profile, setNickname]);
+  }, [profile, setNickname, setAvatarUrl]);
   /** 좋아요 별 강조(더 크고 밝게) 표시 여부 — localStorage 유지 */
   const [likedGlowOn, setLikedGlowOn] = useState(true);
   /** 씬의 좋아요 별 강조 갱신 API (three 이펙트가 채움) — 빈 배열이면 강조 제거 */
@@ -2000,10 +2041,12 @@ export default function GalaxyCanvas({
       {/* 데스크톱 전용 — 모바일에서는 아래 햄버거 버튼이 대신한다 */}
       <div className="absolute right-4 top-4 z-10 hidden gap-2 sm:flex">
         {authState.authenticated ? (
-          /* 닉네임 클릭 → 우측 드로어 (메뉴 + 행성 프로필 편집) */
+          /* 닉네임 클릭 → 버튼 아래에 붙는 계정 드롭다운 */
           <button
             type="button"
-            onClick={() => setDrawerOpen(true)}
+            onClick={(e) => toggleMenu(e.currentTarget)}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
             className="flex items-center gap-2 rounded-full border border-amber-200/30 bg-amber-100/10 py-1 pl-1 pr-3.5 text-sm text-amber-100/90 backdrop-blur transition hover:bg-amber-100/20"
           >
             <Avatar src={authState.avatarUrl} nickname={authState.nickname} size={26} />
@@ -2023,6 +2066,17 @@ export default function GalaxyCanvas({
             >
               곡 목록
             </Link>
+            {/* 로그인 전에도 메뉴로 들어갈 문이 있어야 한다 — 내 노래 목록 등은 로그인 없이도 볼 수 있다 */}
+            <button
+              type="button"
+              onClick={(e) => toggleMenu(e.currentTarget)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="메뉴"
+              className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
+            >
+              ☰
+            </button>
           </>
         )}
         {skyInfo ? (
@@ -2055,11 +2109,13 @@ export default function GalaxyCanvas({
         )}
       </div>
 
-      {/* 모바일 — ☰ 버튼 하나로 드로어 열기 */}
+      {/* 모바일 — 버튼 하나로 같은 드롭다운 열기 */}
       <div className="absolute right-4 top-4 z-10 sm:hidden">
         <button
           type="button"
-          onClick={() => setDrawerOpen(true)}
+          onClick={(e) => toggleMenu(e.currentTarget)}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
           className="grid place-items-center rounded-full border border-white/20 bg-white/10 p-1 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
           aria-label="메뉴"
         >
@@ -2071,25 +2127,171 @@ export default function GalaxyCanvas({
         </button>
       </div>
 
-      {/* 우측 드로어 — 메뉴 + 행성 프로필 편집 */}
-      {drawerOpen && (
-        /* 알약(z-40)보다 위에 깔아야 한다 — 목록 재생 중에는 알약이 영상 패널만큼 커져
-           드로어를 덮고, 그러면 메뉴 항목이 눌리지 않는다 */
-        <div className="fixed inset-0 z-[45] bg-black/50" onClick={() => setDrawerOpen(false)} />
+      {/* 계정 드롭다운 — 계정 버튼 바로 아래에 뜬다 (GitHub 스타일).
+          계정 버튼은 z-10 컨테이너 안에 있어 그 자식으로 넣으면 알약(z-40) 아래에 깔린다.
+          그래서 fixed로 떼어내고, 붙을 자리는 눌린 버튼을 재서(menuAnchor) 맞춘다 */}
+      {menuOpen && (
+        <>
+          {/* 바깥 클릭으로 닫기. 알약(z-40)보다 위에 깔아야 한다 —
+              목록 재생 중에는 알약이 영상 패널만큼 커져 메뉴를 덮고, 그러면 항목이 눌리지 않는다 */}
+          <div className="fixed inset-0 z-[45]" onClick={() => setMenuOpen(false)} />
+          <nav
+            aria-label="계정 메뉴"
+            style={{ top: menuAnchor.top, right: menuAnchor.right }}
+            className="fixed z-50 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-white/15 bg-black/90 py-1 shadow-2xl backdrop-blur"
+          >
+            {/* 누구로 로그인했는지부터 보여준다 — 계정이 여럿인 사람에게는 이게 첫 정보다 */}
+            <div className="flex items-center gap-2 px-3 py-2.5">
+              {authState.authenticated ? (
+                <>
+                  <Avatar src={authState.avatarUrl} nickname={authState.nickname} size={30} />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm text-amber-100/90">
+                      {authState.nickname}
+                    </span>
+                    <span className="block text-[11px] text-white/35">(으)로 로그인됨</span>
+                  </span>
+                </>
+              ) : (
+                <span>
+                  <span className="block text-sm text-white/80">songGalaxy</span>
+                  <span className="block text-[11px] text-white/35">로그인하지 않음</span>
+                </span>
+              )}
+            </div>
+            <div className="border-t border-white/10" />
+
+            {authState.authenticated ? (
+              <>
+                {authState.star && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      goMyStar();
+                    }}
+                    className={MENU_ITEM_ACCENT}
+                  >
+                    ✦ 내 별로 이동
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    toggleLikedGlow();
+                  }}
+                  className={MENU_ITEM}
+                >
+                  {likedGlowOn ? "🌟 좋아요 별 강조 끄기" : "🌟 좋아요 별 강조 켜기"}
+                </button>
+                <Link href="/me" onClick={() => setMenuOpen(false)} className={MENU_ITEM}>
+                  ♥ 내 취향 페이지
+                </Link>
+              </>
+            ) : (
+              <a
+                href="/api/auth/signin?callbackUrl=/"
+                className={`${MENU_ITEM} text-white`}
+                onClick={() => setMenuOpen(false)}
+              >
+                Google 로그인
+              </a>
+            )}
+            <Link href="/songs" onClick={() => setMenuOpen(false)} className={MENU_ITEM}>
+              ♪ 곡 목록
+            </Link>
+            {/* 알약의 +로 만든 목록을 열고·재생하고·공유하는 유일한 입구.
+                /me와 같은 자리에 둔다 — 로그인 전에도 보이게 해서 무엇이 있는지 알린다 */}
+            <Link href="/lists" onClick={() => setMenuOpen(false)} className={MENU_ITEM}>
+              ≡ 내 노래 목록
+            </Link>
+
+            {skyInfo ? (
+              <>
+                <div className="my-1 border-t border-white/10" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    copyPlanetLink();
+                  }}
+                  className={MENU_ITEM}
+                >
+                  🔗 행성 링크 복사
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    exitSkyRef.current?.();
+                  }}
+                  className={MENU_ITEM_ACCENT}
+                >
+                  은하로 나가기
+                </button>
+              </>
+            ) : (
+              /* 데스크톱에는 우측 상단에 같은 버튼이 있어 중복이다.
+                 모바일은 그 버튼이 sm:flex로 숨겨져 메뉴가 유일한 통로이므로 거기서만 보인다.
+                 구분선까지 함께 숨겨야 데스크톱에 줄만 덩그러니 남지 않는다 */
+              <div className="sm:hidden">
+                <div className="my-1 border-t border-white/10" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    resetRef.current?.();
+                  }}
+                  className={MENU_ITEM}
+                >
+                  🔭 전체 보기
+                </button>
+              </div>
+            )}
+
+            {authState.authenticated && (
+              <>
+                <div className="my-1 border-t border-white/10" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setProfileOpen(true);
+                  }}
+                  className={MENU_ITEM}
+                >
+                  ⚙ 프로필 설정
+                </button>
+                <a
+                  href="/api/auth/signout?callbackUrl=/"
+                  className={`${MENU_ITEM} text-white/50`}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  로그아웃
+                </a>
+              </>
+            )}
+          </nav>
+        </>
+      )}
+
+      {/* 행성 프로필 편집 드로어 — 메뉴의 "프로필 설정"에서만 열린다 */}
+      {profileOpen && (
+        /* 알약(z-40)보다 위 — 목록 재생 중 알약이 커져도 폼을 덮지 못하게 */
+        <div className="fixed inset-0 z-[45] bg-black/50" onClick={() => setProfileOpen(false)} />
       )}
       <aside
-        className={`fixed right-0 top-0 z-50 flex h-dvh w-80 max-w-[85vw] transform flex-col overflow-y-auto border-l border-white/15 bg-black/90 p-5 backdrop-blur transition-transform duration-300 ${drawerOpen ? "translate-x-0" : "translate-x-full"}`}
-        aria-hidden={!drawerOpen}
+        className={`fixed right-0 top-0 z-50 flex h-dvh w-80 max-w-[85vw] transform flex-col overflow-y-auto border-l border-white/15 bg-black/90 p-5 backdrop-blur transition-transform duration-300 ${profileOpen ? "translate-x-0" : "translate-x-full"}`}
+        aria-hidden={!profileOpen}
       >
         <div className="mb-4 flex items-center justify-between">
-          <p className="text-sm font-semibold text-amber-100/90">
-            {authState.authenticated ? `✦ ${authState.nickname}` : "songGalaxy"}
-          </p>
+          <p className="text-sm font-semibold text-amber-100/90">프로필 설정</p>
           <button
             type="button"
-            onClick={() => setDrawerOpen(false)}
+            onClick={() => setProfileOpen(false)}
             className="rounded-full px-2 text-white/60 transition hover:text-white"
-            aria-label="드로어 닫기"
+            aria-label="프로필 설정 닫기"
           >
             ✕
           </button>
@@ -2119,6 +2321,19 @@ export default function GalaxyCanvas({
                     onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
                     className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-amber-200/50"
                   />
+                </label>
+                <label className="text-xs text-white/60">
+                  프로필 사진 주소
+                  <input
+                    value={profile.avatarUrl}
+                    inputMode="url"
+                    placeholder="https://…"
+                    onChange={(e) => setProfile({ ...profile, avatarUrl: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-amber-200/50"
+                  />
+                  <span className="mt-1 block text-[11px] text-white/35">
+                    비워두면 구글 사진, 그것도 없으면 닉네임 첫 글자로 보여요
+                  </span>
                 </label>
                 <label className="text-xs text-white/60">
                   대표곡 <span className="text-white/35">— 행성 라디오가 이 곡부터 시작</span>
@@ -2154,109 +2369,6 @@ export default function GalaxyCanvas({
             )}
           </div>
         )}
-
-        {/* 메뉴 */}
-        <nav className="flex flex-col">
-          {authState.authenticated ? (
-            <>
-              {authState.star && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDrawerOpen(false);
-                    goMyStar();
-                  }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
-                >
-                  ✦ 내 별로 이동
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={toggleLikedGlow}
-                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-              >
-                {likedGlowOn ? "🌟 좋아요 별 강조 끄기" : "🌟 좋아요 별 강조 켜기"}
-              </button>
-              <Link
-                href="/me"
-                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-              >
-                ♥ 내 취향 페이지
-              </Link>
-            </>
-          ) : (
-            <a
-              href="/api/auth/signin?callbackUrl=/"
-              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white transition hover:bg-white/10"
-            >
-              Google 로그인
-            </a>
-          )}
-          <Link
-            href="/songs"
-            className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-          >
-            ♪ 곡 목록
-          </Link>
-          {/* 알약의 +로 만든 목록을 열고·재생하고·공유하는 유일한 입구.
-              /me와 같은 자리에 둔다 — 로그인 전에도 보이게 해서 무엇이 있는지 알린다 */}
-          <Link
-            href="/lists"
-            className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-          >
-            ≡ 내 노래 목록
-          </Link>
-          <div className="my-1 border-t border-white/10" />
-          {skyInfo ? (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setDrawerOpen(false);
-                  copyPlanetLink();
-                }}
-                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-              >
-                🔗 행성 링크 복사
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setDrawerOpen(false);
-                  exitSkyRef.current?.();
-                }}
-                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-100/90 transition hover:bg-white/10 hover:text-amber-100"
-              >
-                은하로 나가기
-              </button>
-            </>
-          ) : (
-            /* 데스크톱에는 우측 상단에 같은 버튼이 있어 중복이다.
-               모바일은 상단 버튼이 sm:flex로 숨겨져 드로어가 유일한 통로이므로 거기서만 보인다 */
-            <button
-              type="button"
-              onClick={() => {
-                setDrawerOpen(false);
-                resetRef.current?.();
-              }}
-              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white sm:hidden"
-            >
-              🔭 전체 보기
-            </button>
-          )}
-          {authState.authenticated && (
-            <>
-              <div className="my-1 border-t border-white/10" />
-              <a
-                href="/api/auth/signout?callbackUrl=/"
-                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/50 transition hover:bg-white/10 hover:text-white"
-              >
-                로그아웃
-              </a>
-            </>
-          )}
-        </nav>
       </aside>
 
       {/* 착륙 진입 플래시 (금빛 커튼) */}
