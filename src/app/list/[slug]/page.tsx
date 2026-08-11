@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits from "@/components/DataCredits";
 import PlaylistPlayButton from "@/components/PlaylistPlayButton";
 import { getPlaylistBySlug } from "@/server/playlists";
@@ -30,9 +31,7 @@ export default async function SharedListPage(props: {
   return (
     <main className="min-h-dvh bg-[#05060f] px-5 py-8 text-white">
       <div className="mx-auto max-w-3xl">
-        <Link href="/" className="text-sm text-white/50 transition hover:text-white">
-          ← 은하로 돌아가기
-        </Link>
+        <BackToGalaxyLink className="text-sm text-white/50 transition hover:text-white" />
         <div className="mt-6 mb-5 flex items-center justify-between gap-4">
           <h1 className="min-w-0 truncate text-2xl font-semibold">{pl.name}</h1>
           <PlaylistPlayButton name={pl.name} songs={pl.songs} />

@@ -12,6 +12,7 @@
  */
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { OverlayProvider } from "./overlay-context";
 
 export default function RouteOverlay({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -35,7 +36,8 @@ export default function RouteOverlay({ children }: { children: React.ReactNode }
       >
         ✕
       </button>
-      {children}
+      {/* 안쪽 화면이 "지금 겹쳐 떠 있다"를 알 수 있어야 은하로 돌아가기가 뒤로 가기가 된다 */}
+      <OverlayProvider value={true}>{children}</OverlayProvider>
     </div>
   );
 }

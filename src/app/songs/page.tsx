@@ -2,6 +2,7 @@ import Link from "next/link";
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
+import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits from "@/components/DataCredits";
 import { searchExternal } from "@/server/import-song";
 import { importSongAction } from "./actions";
@@ -131,9 +132,9 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-semibold">곡 목록</h1>
-          <Link href="/" className="text-sm text-white/50 transition hover:text-white">
+          <BackToGalaxyLink className="text-sm text-white/50 transition hover:text-white">
             ✦ 은하로 돌아가기
-          </Link>
+          </BackToGalaxyLink>
         </div>
 
         {/* 검색 + 필터 — URL에 조건이 남는 건 그대로, 이동만 클라이언트로.

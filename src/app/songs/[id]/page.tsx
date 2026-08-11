@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getSessionUser } from "@/auth";
+import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits from "@/components/DataCredits";
 import LikeButton from "@/components/LikeButton";
 import { enrichSongs } from "@/server/enrich";
@@ -75,9 +76,7 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
     <main className="min-h-dvh bg-[#05060f] px-5 py-8 text-white">
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 flex items-center justify-between">
-          <Link href="/" className="text-sm text-white/50 transition hover:text-white">
-            ← 은하로 돌아가기
-          </Link>
+          <BackToGalaxyLink className="text-sm text-white/50 transition hover:text-white" />
           <Link
             href={`/?song=${song.id}`}
             className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm backdrop-blur transition hover:bg-white/20"

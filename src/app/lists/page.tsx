@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { getSessionUser } from "@/auth";
+import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits from "@/components/DataCredits";
 import { listMyPlaylists } from "@/server/playlists";
 import PlaylistManager from "./PlaylistManager";
@@ -15,9 +15,7 @@ export default async function ListsPage() {
   return (
     <main className="min-h-dvh bg-[#05060f] px-5 py-8 text-white">
       <div className="mx-auto max-w-3xl">
-        <Link href="/" className="text-sm text-white/50 transition hover:text-white">
-          ← 은하로 돌아가기
-        </Link>
+        <BackToGalaxyLink className="text-sm text-white/50 transition hover:text-white" />
         <h1 className="mt-6 mb-1 text-2xl font-semibold">내 노래 목록</h1>
         <p className="mb-5 text-sm text-white/50">
           목록의 곡은 YouTube로 전곡 재생됩니다.

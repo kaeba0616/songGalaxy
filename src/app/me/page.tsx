@@ -6,6 +6,7 @@ import { getSessionUser } from "@/auth";
 import { MIN_LIKES_FOR_STAR } from "@/config/constants";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
 import { DEFAULT_PLANET_THEME, PLANET_THEMES } from "@/config/planet-themes";
+import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits from "@/components/DataCredits";
 import LikeButton from "@/components/LikeButton";
 import { setPlanetThemeAction } from "./actions";
@@ -78,9 +79,9 @@ export default async function MePage() {
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-semibold">✦ {user.nickname}의 취향</h1>
-          <Link href="/" className="text-sm text-white/50 transition hover:text-white">
+          <BackToGalaxyLink className="text-sm text-white/50 transition hover:text-white">
             은하로 돌아가기
-          </Link>
+          </BackToGalaxyLink>
         </div>
 
         {/* 내 별 상태 */}

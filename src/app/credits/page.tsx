@@ -1,4 +1,4 @@
-import Link from "next/link";
+import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits, { SOURCES } from "@/components/DataCredits";
 
 export const metadata = { title: "데이터 출처 — songGalaxy" };
@@ -11,9 +11,7 @@ export default function CreditsPage() {
   return (
     <main className="min-h-dvh bg-[#05060f] px-5 py-8 text-white">
       <div className="mx-auto max-w-3xl">
-        <Link href="/" className="text-sm text-white/50 transition hover:text-white">
-          ← 은하로 돌아가기
-        </Link>
+        <BackToGalaxyLink className="text-sm text-white/50 transition hover:text-white" />
         <h1 className="mt-6 text-2xl font-semibold">데이터 출처</h1>
         <p className="mt-2 text-sm text-white/50">
           songGalaxy의 곡·가수·앨범아트·가사는 아래 서비스에서 받아옵니다.
