@@ -6,7 +6,7 @@
 
 **Architecture:** `playlists`/`playlist_songs` 두 테이블을 추가하고, 기존 `PlayerProvider`가 재생 엔진 두 개(`preview`=`<audio>`, `youtube`=IFrame Player)를 소유해 곡마다 하나만 켠다. 영상 ID는 곡을 목록에 담는 순간 기존 `getYoutubeVideoId`로 한 번만 조회해 `songs` 테이블에 영구 캐시한다.
 
-**Tech Stack:** Next.js 16 App Router, React 19, Drizzle ORM + Postgres, next-auth v5, YouTube IFrame Player API, vitest(순수 로직 전용)
+**Tech Stack:** Next.js 16 App Router, React 19, Drizzle ORM + Postgres, next-auth v5, YouTube IFrame Player API, node:test + tsx(순수 로직 전용)
 
 ## Global Constraints
 
@@ -21,7 +21,11 @@
 
 ## 검증 방식에 대하여
 
-이 저장소에는 테스트 프레임워크가 없고, 지금까지 `npx tsc --noEmit` + `npm run lint` + 브라우저 확인으로 검증해 왔다. 이 계획은 그 관행을 따르되, **외부 의존 없이 순수하게 판단할 수 있는 로직 3개**(공유 slug 생성, 재생 엔진 선택, 곡 순서 계산)에만 vitest를 도입한다. 이 셋은 잘못되면 조용히 틀리는 종류라 테스트 가치가 높고, DB·브라우저·외부 API가 필요 없어 셋업이 가볍다. 나머지(라우트·UI·외부 API)는 기존대로 타입 검사와 브라우저로 확인한다.
+이 저장소에는 테스트 프레임워크가 없고, 지금까지 `npx tsc --noEmit` + `npm run lint` + 브라우저 확인으로 검증해 왔다. 이 계획은 그 관행을 따르되, **외부 의존 없이 순수하게 판단할 수 있는 로직 3개**(공유 slug 생성, 재생 엔진 선택, 곡 순서 계산)에만 테스트를 붙인다. 이 셋은 잘못되면 조용히 틀리는 종류라 테스트 가치가 높다. 나머지(라우트·UI·외부 API)는 기존대로 타입 검사와 브라우저로 확인한다.
+
+테스트 러너는 **Node 20 내장 `node:test`** 를 쓰고, 이미 devDependency인 `tsx`로 실행한다. 처음에는 vitest를 쓰려 했으나 이 환경에서 `npm install`이 재현 가능하게 행이 걸린다 — `npm view`는 즉시 응답하는데 install만 CPU 0.4%로 18분 이상 멈춘다. 내장 러너는 새 패키지가 필요 없어 이 문제를 통째로 피한다.
+
+실행 형태에 제약이 있다. Node 20의 기본 테스트 파일 패턴은 `.ts`를 인식하지 못해서 `tsx --test src/`(디렉터리)는 0개를 찾고, 따옴표로 감싼 글로브도 통하지 않는다. 파일 경로를 명시해 넘겨야 하므로 `find`로 치환한다 — 실측으로 이 형태만 동작한다.
 
 ## 파일 구조
 
@@ -46,7 +50,7 @@
 
 ---
 
-### Task 1: 스키마 + 순수 로직 유틸 + vitest
+### Task 1: 스키마 + 순수 로직 유틸 + 테스트
 
 **Files:**
 - Modify: `src/db/schema.ts`
@@ -55,7 +59,6 @@
 - Create: `src/lib/share-slug.test.ts`
 - Create: `src/player/engine.test.ts`
 - Modify: `package.json`
-- Create: `vitest.config.ts`
 
 **Interfaces:**
 - Consumes: 없음 (첫 태스크)
@@ -67,58 +70,49 @@
   - `type Engine = "preview" | "youtube"`
   - `pickEngine(opts: { mode: "playlist" | "browse"; youtubeVideoId?: string | null; previewUrl?: string | null }): Engine | null`
 
-- [ ] **Step 1: vitest 설치**
+- [ ] **Step 1: 새 패키지 설치 없음 — 확인만**
 
-```bash
-npm install -D vitest
-```
+이 태스크는 의존성을 추가하지 않는다. `node:test`(Node 20 내장)와 `tsx`(이미 devDependency)만 쓴다.
+`npm install`은 이 환경에서 행이 걸리므로 **절대 실행하지 말 것.**
 
-- [ ] **Step 2: vitest 설정과 스크립트 추가**
+Run: `node --version && npx tsx --version`
+Expected: `v20.x` 이상, `tsx v4.x`
 
-`vitest.config.ts` 생성:
-
-```ts
-import { defineConfig } from "vitest/config";
-
-// 순수 로직만 테스트한다 (DB·브라우저·외부 API 없음) — docs/superpowers/plans 참조
-export default defineConfig({
-  test: {
-    include: ["src/**/*.test.ts"],
-    environment: "node",
-  },
-});
-```
+- [ ] **Step 2: 테스트 스크립트 추가**
 
 `package.json`의 `scripts`에 추가:
 
 ```json
-"test": "vitest run",
-"test:watch": "vitest"
+"test": "tsx --test $(find src -name \"*.test.ts\")"
 ```
+
+`find`로 파일을 명시해 넘기는 이유: Node 20의 기본 테스트 파일 패턴이 `.ts`를 인식하지 못해
+`tsx --test src/`는 0개를 찾고, 따옴표로 감싼 글로브도 통하지 않는다. 실측으로 이 형태만 동작한다.
 
 - [ ] **Step 3: 실패하는 테스트 작성 — share-slug**
 
 `src/lib/share-slug.test.ts`:
 
 ```ts
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import { generateShareSlug } from "./share-slug";
 
 describe("generateShareSlug", () => {
   it("10자를 만든다", () => {
-    expect(generateShareSlug()).toHaveLength(10);
+    assert.equal(generateShareSlug().length, 10);
   });
 
   it("헷갈리는 글자(0 O 1 l I)를 쓰지 않는다", () => {
     // 링크를 손으로 옮겨 적는 사람이 있으므로 혼동 문자를 뺀다
     for (let i = 0; i < 200; i++) {
-      expect(generateShareSlug()).not.toMatch(/[0O1lI]/);
+      assert.doesNotMatch(generateShareSlug(), /[0O1lI]/);
     }
   });
 
   it("난수원이 같으면 같은 값이 나온다", () => {
     const fixed = () => 0;
-    expect(generateShareSlug(fixed)).toBe(generateShareSlug(fixed));
+    assert.equal(generateShareSlug(fixed), generateShareSlug(fixed));
   });
 
   it("난수원이 다르면 다른 값이 나온다", () => {
@@ -126,7 +120,7 @@ describe("generateShareSlug", () => {
     const seq = () => (n++ % 7) / 7;
     const a = generateShareSlug(seq);
     const b = generateShareSlug(seq);
-    expect(a).not.toBe(b);
+    assert.notEqual(a, b);
   });
 });
 ```
@@ -136,40 +130,41 @@ describe("generateShareSlug", () => {
 `src/player/engine.test.ts`:
 
 ```ts
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import { nextPosition, pickEngine } from "./engine";
 
 describe("nextPosition", () => {
   it("빈 목록이면 0", () => {
-    expect(nextPosition([])).toBe(0);
+    assert.equal(nextPosition([]), 0);
   });
 
   it("가장 큰 값 다음을 준다", () => {
-    expect(nextPosition([0, 1, 2])).toBe(3);
+    assert.equal(nextPosition([0, 1, 2]), 3);
   });
 
   it("구멍이 있어도 최대값 기준으로 준다", () => {
     // 곡을 빼면 position에 구멍이 생긴다. 길이가 아니라 최대값을 봐야 충돌하지 않는다
-    expect(nextPosition([0, 5])).toBe(6);
+    assert.equal(nextPosition([0, 5]), 6);
   });
 });
 
 describe("pickEngine", () => {
   it("목록 재생이고 영상이 있으면 youtube", () => {
-    expect(pickEngine({ mode: "playlist", youtubeVideoId: "abc", previewUrl: "p" })).toBe("youtube");
+    assert.equal(pickEngine({ mode: "playlist", youtubeVideoId: "abc", previewUrl: "p" }), "youtube");
   });
 
   it("목록 재생이어도 영상이 없으면 preview로 떨어진다", () => {
-    expect(pickEngine({ mode: "playlist", youtubeVideoId: null, previewUrl: "p" })).toBe("preview");
+    assert.equal(pickEngine({ mode: "playlist", youtubeVideoId: null, previewUrl: "p" }), "preview");
   });
 
   it("탐색 중에는 영상이 있어도 preview를 쓴다", () => {
     // 쿼터와 UX 모두의 이유 — 은하 탐색은 30초 미리듣기로 가볍게 유지한다
-    expect(pickEngine({ mode: "browse", youtubeVideoId: "abc", previewUrl: "p" })).toBe("preview");
+    assert.equal(pickEngine({ mode: "browse", youtubeVideoId: "abc", previewUrl: "p" }), "preview");
   });
 
   it("둘 다 없으면 null (호출부가 다음 곡으로 건너뛴다)", () => {
-    expect(pickEngine({ mode: "playlist", youtubeVideoId: null, previewUrl: null })).toBeNull();
+    assert.equal(pickEngine({ mode: "playlist", youtubeVideoId: null, previewUrl: null }), null);
   });
 });
 ```
@@ -297,7 +292,7 @@ Expected: 새 파일에서 오류 없음 (기존 파일의 기존 오류는 무�
 - [ ] **Step 12: 커밋**
 
 ```bash
-git add package.json package-lock.json vitest.config.ts src/db/schema.ts src/lib/share-slug.ts src/lib/share-slug.test.ts src/player/engine.ts src/player/engine.test.ts
+git add package.json src/db/schema.ts src/lib/share-slug.ts src/lib/share-slug.test.ts src/player/engine.ts src/player/engine.test.ts
 git commit -m "feat: 노래 목록 스키마 + 공유 slug·엔진 선택 유틸"
 ```
 
