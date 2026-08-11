@@ -8,16 +8,20 @@ import LikeButton from "@/components/LikeButton";
 import { enrichSongs } from "@/server/enrich";
 import { getArtistInfo } from "@/server/artist-info";
 import { getLyrics } from "@/server/lyrics";
+import { getYoutubeVideoId } from "@/server/youtube";
 
 export const dynamic = "force-dynamic";
 
 /**
  * 곡 상세 페이지 — 메타데이터 + 가수 정보(MusicBrainz) + YouTube 재생 + 가사(LRCLIB).
  *
- * YouTube 영상은 **이미 캐시된 ID가 있을 때만** 임베드한다. 여기서 `getYoutubeVideoId`를
- * 부르면 안 된다: 이 페이지는 force-dynamic이고 공개(공유 목록에서 곡마다 링크된다)라
- * 크롤러가 링크를 따라오는 것만으로 하루 100회 검색 쿼터가 통째로 마른다.
- * 영상 ID를 새로 찾는 곳은 목록에 담을 때와 소유자가 목록을 열 때뿐이다 (docs/SSOT.md).
+ * YouTube 영상 ID는 캐시가 있으면 그걸 쓰고, 없으면 **로그인한 사람이 연 경우에만** 찾는다.
+ *
+ * 이 페이지는 force-dynamic이고 공개다(공유 목록이 곡마다 여기로 링크한다). 그래서
+ * 누구에게나 찾아주면 크롤러가 링크를 훑는 것만으로 하루 100회 검색 쿼터가 통째로 마른다 —
+ * 한때 그 이유로 조회를 아예 뺐었지만, 그러면 목록에 담기 전까지 영상이 안 뜬다.
+ * 로그인 조건이 둘을 모두 만족시킨다: 크롤러는 로그인하지 않고, 로그인한 사람도
+ * `YOUTUBE_LOOKUPS_PER_USER_PER_DAY`에 막혀 서비스 전체 쿼터를 말릴 수 없다 (docs/SSOT.md).
  */
 export default async function SongDetailPage(props: { params: Promise<{ id: string }> }) {
   const { id } = await props.params;
@@ -35,11 +39,14 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
     : [undefined];
 
   const user = await getSessionUser();
-  const videoId = song.youtubeVideoId; // 캐시된 것만 — 새로 찾지 않는다 (위 주석)
-  const [media, artist, lyrics, [likeCount], myLike] = await Promise.all([
+  const [media, artist, lyrics, videoId, [likeCount], myLike] = await Promise.all([
     enrichSongs([songId]).then((m) => m[songId]),
     getArtistInfo(song.artist, song.genre),
     getLyrics(songId),
+    // 캐시가 있으면 그걸 쓰고, 없으면 로그인한 사람이 연 경우에만 찾는다.
+    // 크롤러는 로그인하지 않으므로 공개 링크를 훑는 것만으로는 쿼터가 새지 않고,
+    // 로그인한 사람도 YOUTUBE_LOOKUPS_PER_USER_PER_DAY에 막혀 서비스 전체를 말릴 수 없다.
+    song.youtubeVideoId ?? (user ? getYoutubeVideoId(songId, user.id) : null),
     db
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.likes)
