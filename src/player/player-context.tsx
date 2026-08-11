@@ -387,6 +387,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.volume = volumeRef.current;
       audio.src = previewUrl as string;
       audio.onended = () => void advanceRef.current(song.id);
+      /**
+       * 소스를 못 읽으면 onended가 영영 오지 않는다 — 핸들러가 없으면 알약만 남고
+       * 소리도 다음 곡도 없이 멈춘다("재생 버튼은 있는데 누르면 바로 꺼진다").
+       * 그래서 실패도 곡이 끝난 것과 같게 취급해 다음 곡으로 넘긴다.
+       * src를 바꾸는 순간 이전 로드는 abort이지 error가 아니므로 오발동하지 않는다.
+       */
+      audio.onerror = () => void advanceRef.current(song.id);
       return audio.play();
     },
     [clearIfStill, rejectPendingYt, setEngine, setPaused, setPlayingId, silenceOther, startYoutube],
