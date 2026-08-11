@@ -23,6 +23,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, account, profile }) {
       if (account && profile?.sub) {
         const nickname = profile.name ?? "이름 없는 별";
+        /** 구글이 주는 프로필 사진. 없을 수도 있다 */
+        const googlePicture = typeof profile.picture === "string" ? profile.picture : null;
         const [existing] = await db
           .select()
           .from(schema.users)
@@ -30,10 +32,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (existing) {
           token.userId = existing.id;
           token.nickname = existing.nickname;
+          // 비어 있을 때만 채운다 — 직접 바꾼 사진을 로그인할 때마다 덮어쓰면 안 된다
+          if (!existing.avatarUrl && googlePicture) {
+            await db
+              .update(schema.users)
+              .set({ avatarUrl: googlePicture })
+              .where(eq(schema.users.id, existing.id));
+          }
         } else {
           const [created] = await db
             .insert(schema.users)
-            .values({ googleSub: profile.sub, nickname })
+            .values({ googleSub: profile.sub, nickname, avatarUrl: googlePicture })
             .returning();
           token.userId = created.id;
           token.nickname = created.nickname;

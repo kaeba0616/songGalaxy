@@ -14,6 +14,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { BIO_MAX, ENRICH_BATCH, MIN_LIKES_FOR_STAR, NICKNAME_MAX } from "@/config/constants";
 import { getPlanetTheme } from "@/config/planet-themes";
+import Avatar from "@/components/Avatar";
 import DataCredits from "@/components/DataCredits";
 import { hashString, mulberry32 } from "@/lib/layout-math";
 import { useLikes } from "@/likes/likes-context";
@@ -2003,9 +2004,10 @@ export default function GalaxyCanvas({
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            className="rounded-full border border-amber-200/30 bg-amber-100/10 px-4 py-1.5 text-sm text-amber-100/90 backdrop-blur transition hover:bg-amber-100/20"
+            className="flex items-center gap-2 rounded-full border border-amber-200/30 bg-amber-100/10 py-1 pl-1 pr-3.5 text-sm text-amber-100/90 backdrop-blur transition hover:bg-amber-100/20"
           >
-            ✦ {authState.nickname}
+            <Avatar src={authState.avatarUrl} nickname={authState.nickname} size={26} />
+            {authState.nickname}
           </button>
         ) : (
           <>
@@ -2058,10 +2060,14 @@ export default function GalaxyCanvas({
         <button
           type="button"
           onClick={() => setDrawerOpen(true)}
-          className="rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
+          className="grid place-items-center rounded-full border border-white/20 bg-white/10 p-1 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
           aria-label="메뉴"
         >
-          ☰
+          {authState.authenticated ? (
+            <Avatar src={authState.avatarUrl} nickname={authState.nickname} size={26} />
+          ) : (
+            <span className="px-2.5 py-0.5">☰</span>
+          )}
         </button>
       </div>
 

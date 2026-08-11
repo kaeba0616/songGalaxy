@@ -15,6 +15,7 @@ export async function GET(): Promise<NextResponse> {
       .select({
         nickname: schema.users.nickname,
         bio: schema.users.bio,
+        avatarUrl: schema.users.avatarUrl,
         pinnedSongId: schema.users.pinnedSongId,
       })
       .from(schema.users)
@@ -34,19 +35,24 @@ export async function GET(): Promise<NextResponse> {
   return NextResponse.json({ ...me, likedSongs }, { headers: { "Cache-Control": "no-store" } });
 }
 
-/** PATCH /api/profile { nickname?, bio?, pinnedSongId? } — 행성 프로필 편집 */
+/** PATCH /api/profile { nickname?, bio?, avatarUrl?, pinnedSongId? } — 행성 프로필 편집 */
 export async function PATCH(req: Request): Promise<NextResponse> {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "로그인이 필요합니다" }, { status: 401 });
   const body = (await req.json().catch(() => null)) as {
     nickname?: unknown;
     bio?: unknown;
+    avatarUrl?: unknown;
     pinnedSongId?: unknown;
   } | null;
   if (!body) return NextResponse.json({ error: "잘못된 요청" }, { status: 400 });
 
-  const updates: Partial<{ nickname: string; bio: string | null; pinnedSongId: number | null }> =
-    {};
+  const updates: Partial<{
+    nickname: string;
+    bio: string | null;
+    avatarUrl: string | null;
+    pinnedSongId: number | null;
+  }> = {};
 
   if (body.nickname !== undefined) {
     const nickname = String(body.nickname).trim();
@@ -65,6 +71,28 @@ export async function PATCH(req: Request): Promise<NextResponse> {
       return NextResponse.json({ error: `소개글은 ${BIO_MAX}자까지예요` }, { status: 400 });
     }
     updates.bio = bio.length === 0 ? null : bio;
+  }
+
+  if (body.avatarUrl !== undefined) {
+    const raw = String(body.avatarUrl).trim();
+    if (raw.length === 0) {
+      updates.avatarUrl = null;
+    } else {
+      // https만 받는다 — http는 페이지가 https라 어차피 막히고, javascript:·data: 같은 것을 걸러낸다
+      let ok = false;
+      try {
+        ok = new URL(raw).protocol === "https:";
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        return NextResponse.json(
+          { error: "이미지 주소는 https:// 로 시작해야 해요" },
+          { status: 400 },
+        );
+      }
+      updates.avatarUrl = raw;
+    }
   }
 
   if (body.pinnedSongId !== undefined) {
@@ -100,6 +128,7 @@ export async function PATCH(req: Request): Promise<NextResponse> {
     .returning({
       nickname: schema.users.nickname,
       bio: schema.users.bio,
+      avatarUrl: schema.users.avatarUrl,
       pinnedSongId: schema.users.pinnedSongId,
     });
   return NextResponse.json(updated);

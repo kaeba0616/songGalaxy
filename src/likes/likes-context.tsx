@@ -13,6 +13,8 @@ export interface AuthState {
   authenticated: boolean;
   userId?: number;
   nickname?: string;
+  /** 프로필 사진 URL — 없으면 닉네임 첫 글자로 대신 그린다 */
+  avatarUrl?: string | null;
   likedIds: Set<number>;
   likesCount: number;
   /** 내 별 좌표 (없으면 아직 미탄생) */
@@ -62,6 +64,7 @@ export function LikesProvider({ children }: { children: React.ReactNode }) {
           authenticated: boolean;
           userId?: number;
           nickname?: string;
+          avatarUrl?: string | null;
           likedIds?: number[];
           likesCount?: number;
           star?: { x: number; y: number; z: number } | null;
@@ -71,6 +74,7 @@ export function LikesProvider({ children }: { children: React.ReactNode }) {
             authenticated: data.authenticated,
             userId: data.userId,
             nickname: data.nickname,
+            avatarUrl: data.avatarUrl ?? null,
             likedIds: new Set(data.likedIds ?? []),
             likesCount: data.likesCount ?? 0,
             star: data.star ?? null,

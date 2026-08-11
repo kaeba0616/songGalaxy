@@ -117,6 +117,11 @@ export const users = pgTable("users", {
   planetTheme: text("planet_theme"),
   /** 행성 프로필 한 줄 소개 — 방문자 정보 패널에 보인다 */
   bio: text("bio"),
+  /**
+   * 프로필 사진 URL. 첫 로그인 때 Google이 준 사진으로 채우고, 유저가 직접 바꿀 수 있다.
+   * 파일을 받아 보관하지 않고 링크만 둔다 — 앨범아트·미리듣기와 같은 방침이다.
+   */
+  avatarUrl: text("avatar_url"),
   /** 대표곡(좋아요 중 하나) — 행성 라디오가 이 곡부터 시작 */
   pinnedSongId: integer("pinned_song_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
