@@ -40,6 +40,55 @@ const RULES: { from: string[]; country: string; to: string }[] = [
   { from: ["j-rock", "j-pop", "j-idol"], country: "TR", to: "turkish" },
 ];
 
+/**
+ * 국가 하나로는 갈 곳이 정해지지 않는 가수들 — 사람이 하나씩 정한 매핑.
+ * 미국·영국 가수라는 것만으로는 재즈인지 록인지 알 수 없기 때문이다.
+ * 여기 없는 가수는 건드리지 않는다.
+ *
+ * Strike는 MusicBrainz가 GB라고 하지만 곡 제목이 전부 포르투갈어라 브라질 밴드로 본다.
+ * Demarco·Spice는 국가가 CA·GB로 잡혔지만 자메이카 댄스홀 가수다
+ * (Spice는 이미 자기 곡 12개 중 9개가 dancehall에 있다).
+ */
+const BY_ARTIST: Record<string, string> = {
+  // 보컬 재즈·스탠더드
+  "Norah Jones": "jazz",
+  "Michael Bublé": "jazz",
+  "Diana Krall": "jazz",
+  "Doris Day": "jazz",
+  "Perry Como": "jazz",
+  "Bobby Darin": "jazz",
+  // 힙합·알앤비·일렉트로닉
+  "Fetty Wap": "hip-hop",
+  Blackstreet: "r-n-b",
+  "Montell Jordan": "r-n-b",
+  "Tom Misch": "r-n-b",
+  "Flying Lotus": "electronic",
+  // 자메이카 계열 (국가가 잘못 잡힌 케이스)
+  Demarco: "dancehall",
+  Spice: "dancehall",
+  "J Boog": "reggae",
+  // 프로그레시브·사이키델릭 록
+  "King Crimson": "psych-rock",
+  "Gentle Giant": "psych-rock",
+  Camel: "psych-rock",
+  "Frank Zappa": "psych-rock",
+  // 일반 록
+  Badfinger: "rock",
+  Raspberries: "rock",
+  "The Black Crowes": "rock",
+  "Dave Matthews Band": "rock",
+  "Rusted Root": "rock",
+  "The Go-Go's": "rock",
+  Plini: "rock",
+  // 인디
+  flipturn: "indie",
+  "Sharon Van Etten": "indie",
+  "The Connells": "indie-pop",
+  // 브라질
+  "Reginaldo Rossi": "brazil",
+  Strike: "brazil",
+};
+
 interface Target extends Record<string, unknown> {
   id: number;
   title: string;
@@ -65,10 +114,51 @@ async function targetsFor(rule: (typeof RULES)[number]): Promise<Target[]> {
   return rows.rows;
 }
 
+/** BY_ARTIST에 적힌 가수의, 아직 일본 장르에 남아 있는 곡들 */
+async function targetsForArtist(artist: string): Promise<Target[]> {
+  const rows = await db.execute<Target>(sql`
+    SELECT id, title, artist, genre, '' AS country
+    FROM songs
+    WHERE artist = ${artist}
+      AND genre IN ('j-pop', 'j-rock', 'j-idol', 'j-dance')
+    ORDER BY id`);
+  return rows.rows;
+}
+
 async function main(): Promise<void> {
   let moved = 0;
   let failed = 0;
   const methods: Record<string, number> = {};
+
+  /** 장르를 바꾸고 좌표를 다시 잡는다. 되돌릴 수 있도록 이전 값을 먼저 남긴다 */
+  async function move(t: Target, to: string): Promise<void> {
+    const placement = await placeSong({
+      genre: to,
+      seedKey: String(t.id),
+      title: t.title,
+      artist: t.artist,
+    });
+    if (!placement) {
+      failed += 1;
+      return;
+    }
+    await db.execute(sql`
+      INSERT INTO songs_backup_genre_fix (id, old_genre, old_theme_id, old_pos_x, old_pos_y, old_pos_z)
+      SELECT id, genre, theme_id, pos_x, pos_y, pos_z FROM songs WHERE id = ${t.id}
+      ON CONFLICT (id) DO NOTHING`);
+    await db
+      .update(schema.songs)
+      .set({
+        genre: to,
+        themeId: placement.themeId,
+        posX: placement.x,
+        posY: placement.y,
+        posZ: placement.z,
+      })
+      .where(sql`id = ${t.id}`);
+    methods[placement.method] = (methods[placement.method] ?? 0) + 1;
+    moved += 1;
+  }
 
   for (const rule of RULES) {
     const targets = await targetsFor(rule);
@@ -80,35 +170,19 @@ async function main(): Promise<void> {
     if (!APPLY) continue;
 
     for (const t of targets) {
-      const placement = await placeSong({
-        genre: rule.to,
-        seedKey: String(t.id),
-        title: t.title,
-        artist: t.artist,
-      });
-      if (!placement) {
-        failed += 1;
-        continue;
-      }
-      // 되돌릴 수 있도록 먼저 남긴다
-      await db.execute(sql`
-        INSERT INTO songs_backup_genre_fix (id, old_genre, old_theme_id, old_pos_x, old_pos_y, old_pos_z)
-        SELECT id, genre, theme_id, pos_x, pos_y, pos_z FROM songs WHERE id = ${t.id}
-        ON CONFLICT (id) DO NOTHING`);
-      await db
-        .update(schema.songs)
-        .set({
-          genre: rule.to,
-          themeId: placement.themeId,
-          posX: placement.x,
-          posY: placement.y,
-          posZ: placement.z,
-        })
-        .where(sql`id = ${t.id}`);
-      methods[placement.method] = (methods[placement.method] ?? 0) + 1;
-      moved += 1;
+      await move(t, rule.to);
       if (moved % 25 === 0) process.stdout.write(`\r  옮기는 중 ${moved}곡   `);
     }
+  }
+
+  // 사람이 정한 가수별 매핑
+  console.log("\n[가수별 지정]");
+  for (const [artist, to] of Object.entries(BY_ARTIST)) {
+    const targets = await targetsForArtist(artist);
+    if (targets.length === 0) continue;
+    console.log(`  ${artist} (${targets[0].genre}) → ${to}: ${targets.length}곡`);
+    if (!APPLY) continue;
+    for (const t of targets) await move(t, to);
   }
 
   if (!APPLY) {
