@@ -42,7 +42,7 @@
 | `src/db/schema.ts` (수정) | `planetDecor` 테이블 정의 |
 | `src/server/planet-decor.ts` (신규) | 읽기/토글 (DB 접근) |
 | `src/app/api/users/[id]/likes/route.ts` (수정) | 응답에 `decor: string[]` 추가 |
-| `src/app/me/actions.ts` (수정) | `togglePlanetDecorAction` |
+| `src/app/me/actions.ts` (수정) | `setPlanetDecorAction` |
 | `src/app/me/page.tsx` (수정) | "행성 꾸미기" 섹션 |
 | `src/galaxy/planet-decor-objects.ts` (신규) | slug → `THREE.Object3D` (three.js 전용) |
 | `src/galaxy/GalaxyCanvas.tsx` (수정) | 착륙 응답에서 decor를 받아 `enterSky`가 씬에 얹음 |
@@ -275,7 +275,7 @@ EOF
 - Produces:
   - `schema.planetDecor` (Drizzle 테이블)
   - `listPlanetDecor(userId: number): Promise<string[]>`
-  - `togglePlanetDecor(userId: number, slug: string): Promise<boolean>` — 켜졌으면 true
+  - `setPlanetDecor(userId: number, slug: string, on: boolean): Promise<void>` — 원하는 상태를 받는다(뒤집지 않는다)
   - `GET /api/users/[id]/likes` 응답에 `decor: string[]`
 
 - [ ] **Step 1: 스키마 추가**
@@ -329,16 +329,24 @@ export async function listPlanetDecor(userId: number): Promise<string[]> {
   return rows.map((r) => r.slug).filter(isDecorSlug);
 }
 
-/** 켜고 끄기. 켜졌으면 true. 카탈로그에 없는 slug는 아무 일도 하지 않고 false */
-export async function togglePlanetDecor(userId: number, slug: string): Promise<boolean> {
-  if (!isDecorSlug(slug)) return false;
-  const deleted = await db
+/**
+ * 꾸미기를 켜거나 끈다. "뒤집기"가 아니라 **원하는 상태를 받는다** —
+ * 뒤집기로 만들면 칩을 빠르게 두 번 누를 때 먼저 도착한 요청이 지우고
+ * 나중 요청이 "없으니 넣자"로 되살려, 끄려던 것이 켜진 채 남는다.
+ * 같은 요청이 몇 번 가도 결과가 같아야 한다.
+ */
+export async function setPlanetDecor(userId: number, slug: string, on: boolean): Promise<void> {
+  if (!isDecorSlug(slug)) return;
+  if (on) {
+    await db
+      .insert(schema.planetDecor)
+      .values({ userId, slug })
+      .onConflictDoNothing({ target: [schema.planetDecor.userId, schema.planetDecor.slug] });
+    return;
+  }
+  await db
     .delete(schema.planetDecor)
-    .where(and(eq(schema.planetDecor.userId, userId), eq(schema.planetDecor.slug, slug)))
-    .returning({ slug: schema.planetDecor.slug });
-  if (deleted.length > 0) return false; // 켜져 있던 것을 껐다
-  await db.insert(schema.planetDecor).values({ userId, slug }).onConflictDoNothing();
-  return true;
+    .where(and(eq(schema.planetDecor.userId, userId), eq(schema.planetDecor.slug, slug)));
 }
 ```
 
@@ -371,8 +379,8 @@ DB에는 아직 테이블이 없다. 만드는 것은 컨트롤러가 Step 6에�
 `docs/SSOT.md` 표에 두 행을 추가한다 (행성 테마 팔레트 행 근처):
 
 ```markdown
-| 행성 꾸미기 카탈로그·자리 | `src/config/planet-decor.ts` | `/me`의 꾸미기 칩, `togglePlanetDecorAction`의 검증, `GalaxyCanvas`의 씬 배치 | 무엇이 있는지와 어디에 놓이는지가 여기 하나에 있다. 좌표는 저장하지 않고 `decorPlacement(userId, slug)`가 해시로 매번 다시 만든다 — 언덕 실루엣과 같은 방식. `groundHeightOffset`은 지면이 반경 300 구라는 사실(=`enterSky`가 만드는 지면)을 담고 있으므로 둘 중 하나를 바꾸면 같이 바꿔야 한다. three.js를 import하지 않는다(서버도 읽는다) — 도형 생성은 `src/galaxy/planet-decor-objects.ts` |
-| 행성 꾸미기 저장 | `planet_decor` 테이블 | `/api/users/[id]/likes`의 `decor`, `/me`의 칩 상태 | 켜고 끈 것만 저장하고 좌표·순서는 두지 않는다. 창구는 `src/server/planet-decor.ts` 둘뿐(`listPlanetDecor`·`togglePlanetDecor`). 카탈로그에서 뺀 slug는 지우지 않고 **읽을 때** 거른다 — 항목이 돌아오면 다시 보이는 편이 낫다 |
+| 행성 꾸미기 카탈로그·자리 | `src/config/planet-decor.ts` | `/me`의 꾸미기 칩, `setPlanetDecorAction`의 검증, `GalaxyCanvas`의 씬 배치 | 무엇이 있는지와 어디에 놓이는지가 여기 하나에 있다. 좌표는 저장하지 않고 `decorPlacement(userId, slug)`가 해시로 매번 다시 만든다 — 언덕 실루엣과 같은 방식. `groundHeightOffset`은 지면이 반경 300 구라는 사실(=`enterSky`가 만드는 지면)을 담고 있으므로 둘 중 하나를 바꾸면 같이 바꿔야 한다. three.js를 import하지 않는다(서버도 읽는다) — 도형 생성은 `src/galaxy/planet-decor-objects.ts` |
+| 행성 꾸미기 저장 | `planet_decor` 테이블 | `/api/users/[id]/likes`의 `decor`, `/me`의 칩 상태 | 켜고 끈 것만 저장하고 좌표·순서는 두지 않는다. 창구는 `src/server/planet-decor.ts` 둘뿐(`listPlanetDecor`·`setPlanetDecor`). `setPlanetDecor`는 뒤집지 않고 **원하는 상태를 받는다** — 뒤집기는 칩 연타에 뒤집힌다. 카탈로그에서 뺀 slug는 지우지 않고 **읽을 때** 거른다 — 항목이 돌아오면 다시 보이는 편이 낫다 |
 ```
 
 - [ ] **Step 6: Commit**
@@ -687,22 +695,24 @@ EOF
 - Modify: `src/app/me/page.tsx`
 
 **Interfaces:**
-- Consumes: `PLANET_DECOR` (Task 1), `listPlanetDecor`·`togglePlanetDecor` (Task 2)
-- Produces: `togglePlanetDecorAction(formData: FormData): Promise<void>`
+- Consumes: `PLANET_DECOR` (Task 1), `listPlanetDecor`·`setPlanetDecor` (Task 2)
+- Produces: `setPlanetDecorAction(formData: FormData): Promise<void>`
 
 - [ ] **Step 1: 서버 액션**
 
-`src/app/me/actions.ts` 끝에 추가 (import에 `togglePlanetDecor`를 더한다):
+`src/app/me/actions.ts` 끝에 추가 (import에 `setPlanetDecor`를 더한다):
 
 ```ts
 /**
  * 꾸미기 오브젝트 켜고 끄기.
  * 대상 유저는 세션에서만 가져온다 — 폼에서 user id를 받으면 남의 행성을 꾸밀 수 있다.
+ * 폼이 "뒤집어라"가 아니라 **원하는 상태**를 보낸다 — 뒤집기로 만들면 칩을 빠르게
+ * 두 번 누를 때 먼저 온 요청이 지우고 나중 요청이 되살려 끄려던 것이 켜진 채 남는다.
  */
-export async function togglePlanetDecorAction(formData: FormData): Promise<void> {
+export async function setPlanetDecorAction(formData: FormData): Promise<void> {
   const user = await getSessionUser();
   if (!user) return;
-  await togglePlanetDecor(user.id, String(formData.get("slug") ?? ""));
+  await setPlanetDecor(user.id, String(formData.get("slug") ?? ""), formData.get("on") === "1");
   revalidatePath("/me");
 }
 ```
@@ -716,7 +726,7 @@ export async function togglePlanetDecorAction(formData: FormData): Promise<void>
 ```ts
 import { PLANET_DECOR } from "@/config/planet-decor";
 import { listPlanetDecor } from "@/server/planet-decor";
-import { togglePlanetDecorAction, setPlanetThemeAction } from "./actions";
+import { setPlanetDecorAction, setPlanetThemeAction } from "./actions";
 ```
 
 (기존 `setPlanetThemeAction` import 줄을 위 형태로 합친다.)
@@ -737,8 +747,11 @@ import { togglePlanetDecorAction, setPlanetThemeAction } from "./actions";
               {PLANET_DECOR.map((d) => {
                 const on = decorOn.has(d.slug);
                 return (
-                  <form key={d.slug} action={togglePlanetDecorAction}>
+                  <form key={d.slug} action={setPlanetDecorAction}>
                     <input type="hidden" name="slug" value={d.slug} />
+                    {/* 지금 상태의 반대를 "원하는 상태"로 보낸다 — 서버가 뒤집지 않으므로
+                        같은 요청이 두 번 가도 결과가 같다 */}
+                    <input type="hidden" name="on" value={on ? "0" : "1"} />
                     <button
                       type="submit"
                       aria-pressed={on}
