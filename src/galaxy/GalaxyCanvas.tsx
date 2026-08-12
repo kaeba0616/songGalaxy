@@ -2083,27 +2083,9 @@ export default function GalaxyCanvas({
             </button>
           </>
         )}
-        {skyInfo && (
-          <>
-            <button
-              type="button"
-              onClick={copyPlanetLink}
-              className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
-              aria-label="행성 링크 복사"
-              title="행성 링크 복사"
-            >
-              🔗
-            </button>
-            <button
-              type="button"
-              onClick={() => exitSkyRef.current?.()}
-              className="rounded-full border border-amber-200/40 bg-amber-100/15 px-4 py-1.5 text-sm text-amber-100 backdrop-blur transition hover:bg-amber-100/25"
-            >
-              은하로 나가기
-            </button>
-          </>
-        )}
-        {/* 전체 보기는 여기 두지 않는다 — 계정 드롭다운으로 모아 화면 가장자리를 비웠다 */}
+        {/* 행성의 링크 복사·은하로 나가기, 은하의 전체 보기 모두 여기 두지 않는다 —
+            계정 드롭다운으로 모아 화면 가장자리에는 계정 버튼 하나만 남긴다.
+            (행성에서 나가는 길은 드롭다운의 "은하로 나가기"가 유일한 창구다) */}
       </div>
 
       {/* 모바일 — 버튼 하나로 같은 드롭다운 열기 */}
