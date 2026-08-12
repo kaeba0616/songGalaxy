@@ -102,10 +102,14 @@ function lighthouse(theme: PlanetTheme): THREE.Object3D {
   return g;
 }
 
-function lake(theme: PlanetTheme, rng: () => number): THREE.Object3D {
+function lake(theme: PlanetTheme, rng: () => number, distance: number): THREE.Object3D {
   // obelisk와 같은 이유로 Group으로 감싼다 (buildDecor가 position을 덮어쓴다)
   const g = new THREE.Group();
-  const r = 25 + rng() * 15;
+  // 절대 크기로 두면 배치 거리(25~75)보다 커질 수 있어 카메라가 호수 안에 서게 된다 —
+  // 그래서 반경을 거리의 비율로 정한다. buildDecor가 여기에 place.scale(최대 1.25)을
+  // 한 번 더 곱하므로, 비율 상한(0.45)은 그 곱까지 감안해도 거리를 넘지 않게 잡았다
+  // (0.45 * 1.25 = 0.5625, 즉 최악의 경우도 거리의 56%까지만 차오른다)
+  const r = distance * (0.3 + rng() * 0.15);
   // 반투명이라 뒤의(거의 검정인) 지면과 섞인 결과로 보인다 — 예전 배율(x0.5, 불투명도 .55)은
   // 섞고 나면 지면과 몇 단만 차이 나 안 보였다. glow를 거의 그대로 쓰고 불투명도도 올려서
   // "하늘빛이 비치는 수면"이 지면과 확실히 갈라지게 한다
@@ -171,7 +175,7 @@ export function buildDecor(
     case "rocks": obj = rocks(theme, rng); break;
     case "obelisk": obj = obelisk(theme); break;
     case "lighthouse": obj = lighthouse(theme); break;
-    case "lake": obj = lake(theme, rng); break;
+    case "lake": obj = lake(theme, rng, place.distance); break;
     case "moon": obj = moon(theme); sky = true; break;
     default: return null;
   }
