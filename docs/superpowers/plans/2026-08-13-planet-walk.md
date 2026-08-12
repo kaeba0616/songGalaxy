@@ -331,7 +331,9 @@ EOF
 - Consumes: `surfaceNormal` (Task 1), `PLANET_DECOR` (`src/config/planet-decor.ts`, 기존), `buildDecor` (`src/galaxy/planet-decor-objects.ts`, 기존)
 - Produces: 클로저 변수 `planetPivot: THREE.Group | null` — Task 3이 이걸 돌린다
 
-이 태스크가 끝나도 **화면은 지금과 똑같아야 한다.** 구조만 바꾼다.
+이 태스크는 구조만 바꾼다 — 아직 아무것도 움직이지 않는다.
+
+다만 **화면이 완전히 똑같지는 않다**: 곡률 정렬 때문에 멀리 있는 오브젝트가 자기 자리의 법선으로 기운다. 반경 300에 거리 25~75이므로 최대 `asin(75/300) ≈ 14.5°`다. 이건 의도한 것이다 — 작은 행성 위에 선 물체는 원래 그렇게 기울고, 정렬하지 않으면 행성이 도는 순간 전부 옆으로 넘어진 것처럼 보인다.
 
 - [ ] **Step 1: 피벗 만들고 지면을 그 안으로**
 
