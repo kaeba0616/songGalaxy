@@ -33,14 +33,19 @@
 
 ```css
 /* 영상이 떠 있는 동안 본문이 그 아래로 깔리지 않게 자리를 비운다.
-   은하는 <main>을 쓰지 않으므로 이 규칙에 걸리지 않는다 — 전체 화면 캔버스 위에는 겹치는 게 맞다 */
+   은하는 <main>을 쓰지 않으므로 이 규칙에 걸리지 않는다 — 전체 화면 캔버스 위에는 겹치는 게 맞다.
+   padding이 아니라 margin: 이 규칙은 `@import "tailwindcss"` 뒤의 레이어 밖(unlayered) 선언인데,
+   각 페이지의 px-5/py-8은 Tailwind 레이어 안에 있다. CSS Cascade Layers 규칙상 레이어 밖 선언은
+   특이도와 무관하게 항상 이겨 같은 속성이면 겹쳐 더하지 않고 통째로 덮어쓴다 — padding으로 쓰면
+   영상이 없어 변수가 0px인 평소에도 각 페이지의 padding이 사라진다. margin은 어느 <main>도 쓰지
+   않는 속성이라 겹칠 것이 없다 */
 main {
-  padding-right: var(--video-rail-w, 0px);
-  padding-top: var(--video-rail-h, 0px);
+  margin-right: var(--video-rail-w, 0px);
+  margin-top: var(--video-rail-h, 0px);
 }
 ```
 
-값은 `VideoStage`가 자기 크기를 `ResizeObserver`로 재서 `document.documentElement.style`에 쓴다. 픽셀을 하드코딩하지 않으므로 영상 크기·접기 버튼·글꼴이 바뀌어도 따라온다. 넓은 화면에서는 `--video-rail-w`만, 좁은 화면에서는 `--video-rail-h`만 채우고 나머지는 `0px`로 둔다. 무대가 없거나 접히면 둘 다 `0px`이다.
+값은 `VideoStage`가 자기 크기를 `ResizeObserver`로 재서 `document.documentElement.style`에 쓴다. 픽셀을 하드코딩하지 않으므로 영상 크기·접기 버튼·글꼴이 바뀌어도 따라온다. 넓은 화면에서는 `--video-rail-w`만, 좁은 화면에서는 `--video-rail-h`만 채우고 나머지는 `0px`로 둔다. 무대가 없으면 둘 다 `0px`이다. 접힘은 화면 크기에 따라 다르다 — 넓은 화면에서는 접어도 레일이 재생 목록을 계속 들고 있으므로(자기 테두리·배경도 그대로다) 폭은 그대로 예약된다. 좁은 화면의 카드는 접히면 보여줄 게 없어 높이가 0이 된다.
 
 겹쳐 띄운 경로(`@modal`)도 안에 `<main>`이 그대로 있으므로 같은 규칙을 탄다.
 

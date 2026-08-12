@@ -8,6 +8,10 @@
  * 한쪽에만 반영되는 식으로 갈라진다.
  *
  * 필요한 것은 스스로 `usePlayer()`에서 읽는다. 부르는 쪽이 정하는 것은 붙는 자리뿐이다.
+ *
+ * `className` 계약: 안의 `<ul>`은 `flex-1 overflow-y-auto`로 고정돼 있다 — 목록을 실제로
+ * 가두려면 넘기는 `className`이 `flex`/`flex-col`과 높이 상한(고정 높이 또는 `flex-1`+부모의
+ * 높이 제한)을 함께 줘야 한다. 둘 다 없이 평범한 클래스만 넘기면 목록이 끝없이 늘어나고 스크롤도 안 된다.
  */
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { ENRICH_BATCH } from "@/config/constants";

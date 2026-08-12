@@ -59,8 +59,12 @@ export default function VideoStage() {
       const rail = window.matchMedia("(min-width: 640px)").matches;
       const r = el.getBoundingClientRect();
       root.style.setProperty("--video-rail-w", rail ? `${Math.round(r.width)}px` : "0px");
-      // 카드는 top-20(5rem) 아래에 떠 있으므로 그 시작 위치까지 포함해 비운다
-      root.style.setProperty("--video-rail-h", rail ? "0px" : `${Math.round(r.bottom)}px`);
+      // 카드는 top-20(5rem) 아래에 떠 있으므로 그 시작 위치까지 포함해 비운다.
+      // 단, 높이가 0이면(폰에서 영상도 "펼치기" 버튼도 재생 목록도 안 그려지는 상태 —
+      // stageVideoId는 있지만 engine !== "youtube"이고 videoExpanded가 false인 경우)
+      // 화면에 보이는 게 없으므로 top-20 오프셋만 빈 여백으로 남는다. bottom 대신 0을 쓴다
+      const h = r.height === 0 ? 0 : r.bottom;
+      root.style.setProperty("--video-rail-h", rail ? "0px" : `${Math.round(h)}px`);
     };
     apply();
     const ro = new ResizeObserver(apply);

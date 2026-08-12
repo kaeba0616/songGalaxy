@@ -24,6 +24,17 @@ const POS_KEY = "songgalaxy-miniplayer-pos";
 /** 화면 가장자리에서 최소한 남겨둘 여백 — 밖으로 완전히 나가지 않게 */
 const EDGE = 8;
 
+/**
+ * 영상 레일이 지금 차지한 폭. `VideoStage`가 `document.documentElement`에 publish하는
+ * `--video-rail-w`를 그대로 읽는다 — 새 원본을 만들지 않고 이미 있는 걸 재사용한다.
+ * 좁은 화면(레일이 카드로 바뀌는 곳)에서는 0px이라 자연히 영향이 없다.
+ */
+function railWidth(): number {
+  return (
+    parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--video-rail-w")) || 0
+  );
+}
+
 interface Pos {
   x: number;
   y: number;
@@ -63,6 +74,8 @@ export default function MiniPlayer() {
     playStep,
     uiHosted,
     notice,
+    stageVideoId,
+    videoExpanded,
   } = usePlayer();
   const { auth, toggleLike } = useLikes();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -76,23 +89,37 @@ export default function MiniPlayer() {
   /** 포인터와 바 좌상단의 간격 — 드래그 중 바가 튀지 않게 */
   const grabOffset = useRef<Pos>({ x: 0, y: 0 });
 
+  // 알약이 레일 밑으로 끌려 들어가지 않게 오른쪽 한계에서 레일 폭을 뺀다 —
+  // 레일은 알약과 같은 z-40이지만 DOM에서 알약보다 뒤에 그려져(src/app/layout.tsx)
+  // 위에 덮이므로, 겹치면 알약 오른쪽의 볼륨·≡·담기 버튼이 클릭되지 않는다
   const clamp = useCallback((p: Pos): Pos => {
     const el = wrapRef.current;
     const w = el?.offsetWidth ?? 0;
     const h = el?.offsetHeight ?? 0;
     return {
-      x: Math.min(Math.max(p.x, EDGE), Math.max(EDGE, window.innerWidth - w - EDGE)),
+      x: Math.min(Math.max(p.x, EDGE), Math.max(EDGE, window.innerWidth - railWidth() - w - EDGE)),
       y: Math.min(Math.max(p.y, EDGE), Math.max(EDGE, window.innerHeight - h - EDGE)),
     };
   }, []);
 
-  // 창 크기가 줄어 바가 화면 밖으로 밀려나면 다시 안으로
+  // 창 크기가 줄거나 레일이 나타나(또는 폭이 바뀌어) 바가 화면 밖/레일 밑으로 밀려나면
+  // 다시 안으로. 레일 폭이 바뀌는 것은 "resize" 이벤트가 아니라 무대가 서거나 접히는
+  // 사건이라 stageVideoId·videoExpanded를 트리거로 같이 듣는다. pos는 setState의
+  // 갱신 함수 안에서만 읽는다 — 의존성에 넣으면 clamp가 만드는 새 객체가 매번 이 effect를
+  // 다시 돌려 무한 루프가 된다. 저장된 위치가 없으면(기본값 = 하단 중앙, CSS로 항상
+  // 반응형) 갱신 함수가 그대로 null을 돌려주므로 아무 일도 안 한다.
+  // requestAnimationFrame으로 미루는 이유: effect 본문에서 곧바로 setState를 부르면
+  // 렌더가 겹쳐 돈다는 경고(react-hooks/set-state-in-effect)가 뜬다 — 아래 resize
+  // 리스너처럼 콜백 안에서 부르면 그 경고를 피한다
   useEffect(() => {
-    if (!pos) return;
-    const onResize = () => setPos((p) => (p ? clamp(p) : p));
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [pos, clamp]);
+    const reclamp = () => setPos((p) => (p ? clamp(p) : p));
+    const raf = requestAnimationFrame(reclamp);
+    window.addEventListener("resize", reclamp);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", reclamp);
+    };
+  }, [clamp, stageVideoId, videoExpanded]);
 
   const songs = queue?.songs ?? NO_SONGS;
 
