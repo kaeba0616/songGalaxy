@@ -5,9 +5,11 @@ import { useState } from "react";
 import { usePlayer, type PlayerSong } from "@/player/player-context";
 
 export default function PlaylistPlayButton({
+  id,
   name,
   songs,
 }: {
+  id: number;
   name: string;
   songs: PlayerSong[];
 }) {
@@ -20,7 +22,7 @@ export default function PlaylistPlayButton({
     // playPlaylist는 사용자가 다른 곡을 누르거나(superseded) 정지를 누르면(stopped)도
     // 정상적으로 reject한다 — 이걸 그냥 삼키지 않으면 콘솔에 처리되지 않은 거부만 쌓이고,
     // 그렇다고 무조건 삼키면 진짜 실패(영상 못 찾음·무대 미준비)까지 조용히 묻힌다
-    playPlaylist({ title: name, songs }, songs[0].id).catch((e: unknown) => {
+    playPlaylist({ playlistId: id, title: name, songs }, songs[0].id).catch((e: unknown) => {
       const message = e instanceof Error ? e.message : "";
       if (message === "superseded" || message === "stopped") return;
       setError(

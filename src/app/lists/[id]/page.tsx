@@ -39,7 +39,7 @@ export default async function PlaylistDetailPage(props: {
         </Link>
         <div className="mt-6 mb-5 flex items-center justify-between gap-4">
           <h1 className="min-w-0 truncate text-2xl font-semibold">{pl.name}</h1>
-          <PlaylistPlayButton name={pl.name} songs={pl.songs} />
+          <PlaylistPlayButton id={pl.id} name={pl.name} songs={pl.songs} />
         </div>
         <ul className="divide-y divide-white/10 rounded-2xl border border-white/10 bg-white/5">
           {pl.songs.map((s, i) => (

@@ -51,6 +51,12 @@ export interface PlayerQueue {
   title: string;
   subtitle?: string;
   color?: string;
+  /**
+   * 이 큐가 어느 노래 목록에서 왔는지. 목록 화면에서 순서를 바꾸거나 곡을 뺐을 때
+   * "지금 듣고 있는 큐가 그 목록인지" 알아야 해서 둔다 — title만으로는 알 수 없다
+   * (이름이 같은 목록이 여럿일 수 있고, 이름은 바뀐다)
+   */
+  playlistId?: number;
   /** playlist면 YouTube 전곡 재생을 시도한다. 없으면 browse(30초 미리듣기) */
   mode?: "playlist" | "browse";
   songs: PlayerSong[];
@@ -130,6 +136,10 @@ interface PlayerContextValue {
   stageVideoId: string | null;
   /** 목록 재생 시작 — YouTube 전곡 재생을 시도한다 */
   playPlaylist: (queue: PlayerQueue, songId: number) => Promise<void>;
+  /** 그 목록이 지금 큐일 때만 곡 순서를 새 순서로 맞춘다. 재생 중인 곡은 건드리지 않는다 */
+  reorderQueue: (playlistId: number, songIds: number[]) => void;
+  /** 그 목록이 지금 큐일 때 곡을 뺀다. 빼는 곡이 재생 중이면 다음 곡으로 넘어간다 */
+  removeFromQueue: (playlistId: number, songId: number) => void;
   registerYoutube: (api: YoutubeApi | null) => void;
   /** 무대가 영상을 못 틀었다 — 그 곡만 미리듣기로 떨어뜨린다 (폭주하면 목록 전체를 미리듣기로) */
   reportYoutubeError: (reason: YoutubeErrorReason) => void;
@@ -623,6 +633,65 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   /**
+   * 목록 화면에서 순서를 바꿨을 때 지금 듣는 큐도 같은 순서로 맞춘다.
+   *
+   * playingId·오디오·영상은 건드리지 않는다 — 듣던 곡은 그대로 흐르고,
+   * 자동 진행(`advanceRef` → `findPlayable`)이 새 배열에서 현재 곡 다음을 찾는다.
+   * 곡 객체를 그대로 재배열한다(새로 만들지 않는다) — youtubeVideoId 같은
+   * 큐에서만 갱신된 값(영상 실패로 지워진 ID 등)을 잃지 않기 위해서다.
+   */
+  const reorderQueue = useCallback(
+    (playlistId: number, songIds: number[]): void => {
+      const q = queueRef.current;
+      if (!q || q.playlistId !== playlistId) return;
+      const byId = new Map(q.songs.map((s) => [s.id, s]));
+      const songs = songIds.map((id) => byId.get(id)).filter((s): s is PlayerSong => s != null);
+      // 큐에 없는 곡이 섞여 있으면(다른 탭에서 담긴 곡) 재배열을 포기한다 —
+      // 반쪽짜리 큐를 만들면 듣던 곡이 사라질 수 있다
+      if (songs.length !== q.songs.length) return;
+      const next = { ...q, songs };
+      queueRef.current = next;
+      setQueueState(next);
+    },
+    [],
+  );
+
+  /**
+   * 목록에서 뺀 곡을 지금 듣는 큐에서도 뺀다.
+   *
+   * 빼는 곡이 재생 중이면 ⏭를 누른 것과 같게 다음 곡으로 넘긴다 — 그러지 않으면
+   * 큐에 없는 곡이 끝났을 때 `advanceRef`가 `idx < 0`으로 재생을 끝내버린다.
+   *
+   * `playStep(1)`을 그냥 부르면 안 된다: 이미 큐에서 빠진 곡을 찾지 못해(idx < 0)
+   * 목록의 **첫 곡**부터 다시 트는데, 우리가 원하는 것은 뺀 자리의 다음 곡이다.
+   * 그래서 넘길 곡을 빼기 전에 직접 정한다.
+   */
+  const removeFromQueue = useCallback(
+    (playlistId: number, songId: number): void => {
+      const q = queueRef.current;
+      if (!q || q.playlistId !== playlistId) return;
+      const wasPlaying = playingIdRef.current === songId;
+      const at = q.songs.findIndex((s) => s.id === songId);
+      const songs = q.songs.filter((s) => s.id !== songId);
+      const next = { ...q, songs };
+      queueRef.current = next;
+      setQueueState(next);
+      if (!wasPlaying) return;
+      // 뺀 자리로 밀려 올라온 곡이 다음 곡이다. 마지막 곡을 뺐으면 첫 곡으로 돌아간다
+      // (목록 재생은 끝↔처음 루프이므로 자동 진행과 같은 규칙)
+      if (songs.length === 0) {
+        setPlayingId(null);
+        return;
+      }
+      const nextSong = songs[at % songs.length];
+      // playInQueue는 이 큐의 mode를 지킨다 — 목록 재생이면 영상으로 이어진다.
+      // 재생할 수 없는 곡이면 findPlayable이 그 다음으로 알아서 넘어간다
+      void playInQueue(next, nextSong.id).catch(() => undefined);
+    },
+    [playInQueue, setPlayingId],
+  );
+
+  /**
    * 무대가 영상을 못 틀었을 때의 수습 — 그 곡만 미리듣기로 떨어뜨린다.
    *
    * 곡을 통째로 건너뛰면(예전 동작) 임베드가 막힌 영상 하나 때문에 그 곡이 모든 목록에서
@@ -778,6 +847,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setVideoExpanded,
       stageVideoId,
       playPlaylist,
+      reorderQueue,
+      removeFromQueue,
       registerYoutube,
       reportYoutubeError,
       notice,
@@ -805,6 +876,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setVideoExpanded,
       stageVideoId,
       playPlaylist,
+      reorderQueue,
+      removeFromQueue,
       registerYoutube,
       reportYoutubeError,
       notice,
