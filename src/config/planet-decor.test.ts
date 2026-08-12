@@ -42,12 +42,13 @@ describe("decorPlacement", () => {
     assert.notDeepEqual(decorPlacement(7, "trees"), decorPlacement(7, "rocks"));
   });
 
-  it("거리는 60~240 안이다", () => {
-    // 지면은 반경 300 구라 300에 가까우면 표면이 급히 꺼지고 넘으면 지면이 없다
+  it("거리는 25~75 안이다", () => {
+    // 이 행성은 반경 300 구여서 눈높이에서 지평선이 약 30밖에 안 된다.
+    // 그보다 멀리 두면 행성이 스스로 가려 아무것도 안 보인다.
     for (let userId = 1; userId <= 50; userId++) {
       for (const d of PLANET_DECOR) {
         const p = decorPlacement(userId, d.slug);
-        assert.ok(p.distance >= 60 && p.distance <= 240, `${userId}/${d.slug} → ${p.distance}`);
+        assert.ok(p.distance >= 25 && p.distance <= 75, `${userId}/${d.slug} → ${p.distance}`);
       }
     }
   });
