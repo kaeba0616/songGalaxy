@@ -13,15 +13,24 @@ import type { PlanetTheme } from "@/config/planet-themes";
 /** 하늘 돔 위 오브젝트가 놓이는 반경 — 곡 별과 같다 */
 const SKY_RADIUS = 430;
 
-function ground(theme: PlanetTheme, mul: number): THREE.MeshBasicMaterial {
-  // 조명이 없는 씬이라 MeshBasic을 쓴다. 테마 지면색을 밝기만 달리해 실루엣을 만든다
-  return new THREE.MeshBasicMaterial({ color: new THREE.Color(theme.ground).multiplyScalar(mul) });
+/**
+ * 지면 오브젝트용 재질. 조명이 없는 씬이라 MeshBasic을 쓰는데, 처음엔 이걸
+ * theme.ground를 밝기만 달리해(x0.7~x1.6) 만들었다가 실전에서 안 보이는 버그가 났다 —
+ * ground 자체가 거의 검정(#0a141c 등)이라 몇 배를 곱해도 여전히 지면과 한 자리 수 차이라,
+ * 조명 없는 화면에서는 "지면과 같은 색이라 파묻혀 안 보인다". 언덕 실루엣(x0.55)은
+ * 하늘이라는 밝은 배경 위라 괜찮지만, 지면 오브젝트의 배경은 지면 그 자체다.
+ * 그래서 대신 테마의 밝은 포인트색(glow)을 기준으로 삼는다 — glow는 모든 테마에서
+ * ground보다 확실히 밝게 설계돼 있어(팔레트: planet-themes.ts), 배율을 조절해도
+ * 지면과 섞이지 않는다.
+ */
+function glowTone(theme: PlanetTheme, mul: number): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({ color: new THREE.Color(theme.glow).multiplyScalar(mul) });
 }
 
 function trees(theme: PlanetTheme, rng: () => number): THREE.Object3D {
   const g = new THREE.Group();
-  const trunkMat = ground(theme, 0.7);
-  const leafMat = ground(theme, 1.6);
+  const trunkMat = glowTone(theme, 0.55);
+  const leafMat = glowTone(theme, 1.1);
   const n = 3 + Math.floor(rng() * 2);
   for (let i = 0; i < n; i++) {
     const h = 8 + rng() * 6;
@@ -39,7 +48,7 @@ function trees(theme: PlanetTheme, rng: () => number): THREE.Object3D {
 
 function rocks(theme: PlanetTheme, rng: () => number): THREE.Object3D {
   const g = new THREE.Group();
-  const mat = ground(theme, 1.35);
+  const mat = glowTone(theme, 0.85);
   const n = 2 + Math.floor(rng() * 2);
   for (let i = 0; i < n; i++) {
     const r = 3 + rng() * 3;
@@ -56,10 +65,7 @@ function obelisk(theme: PlanetTheme): THREE.Object3D {
   // 메시를 그대로 돌려주면 아래에서 준 y 오프셋이 사라져 오브젝트가 지면에 반쯤 묻힌다
   const g = new THREE.Group();
   const h = 24;
-  const m = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.1, 2.4, h, 4),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(theme.glow).multiplyScalar(0.75) }),
-  );
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 2.4, h, 4), glowTone(theme, 0.75));
   m.position.y = h / 2;
   m.rotation.y = Math.PI / 4;
   g.add(m);
@@ -69,7 +75,7 @@ function obelisk(theme: PlanetTheme): THREE.Object3D {
 function lighthouse(theme: PlanetTheme): THREE.Object3D {
   const g = new THREE.Group();
   const h = 28;
-  const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.2, h, 10), ground(theme, 1.5));
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.2, h, 10), glowTone(theme, 0.75));
   tower.position.y = h / 2;
   const lamp = new THREE.Mesh(
     new THREE.SphereGeometry(2.2, 12, 8),
@@ -100,12 +106,15 @@ function lake(theme: PlanetTheme, rng: () => number): THREE.Object3D {
   // obelisk와 같은 이유로 Group으로 감싼다 (buildDecor가 position을 덮어쓴다)
   const g = new THREE.Group();
   const r = 25 + rng() * 15;
+  // 반투명이라 뒤의(거의 검정인) 지면과 섞인 결과로 보인다 — 예전 배율(x0.5, 불투명도 .55)은
+  // 섞고 나면 지면과 몇 단만 차이 나 안 보였다. glow를 거의 그대로 쓰고 불투명도도 올려서
+  // "하늘빛이 비치는 수면"이 지면과 확실히 갈라지게 한다
   const m = new THREE.Mesh(
     new THREE.CircleGeometry(r, 32),
     new THREE.MeshBasicMaterial({
-      color: new THREE.Color(theme.glow).multiplyScalar(0.5),
+      color: new THREE.Color(theme.glow).multiplyScalar(0.9),
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.75,
       depthWrite: false,
     }),
   );
