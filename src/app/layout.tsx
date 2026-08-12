@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { LikesProvider } from "@/likes/likes-context";
 import MiniPlayer from "@/player/MiniPlayer";
+import VideoStage from "@/player/VideoStage";
 import { PlayerProvider } from "@/player/player-context";
 import "./globals.css";
 
@@ -40,6 +41,9 @@ export default function RootLayout({
             {children}
             {modal}
             <MiniPlayer />
+            {/* 영상 무대는 알약의 형제다 — 알약은 은하 카드 캐러셀이 열리면 사라지는데,
+                무대가 그 자식이면 같이 죽어 전곡 재생을 되살릴 수 없다 (VideoStage 주석) */}
+            <VideoStage />
           </PlayerProvider>
         </LikesProvider>
       </body>

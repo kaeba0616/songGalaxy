@@ -24,7 +24,7 @@ import {
   YT_PLAYBACK_ERROR_LIMIT,
   YT_STAGE_READY_TIMEOUT_MS,
 } from "@/config/constants";
-import { pickEngine, type Engine } from "./engine";
+import { pickEngine, stageSeed, type Engine } from "./engine";
 
 export interface Media {
   artworkUrl: string | null;
@@ -122,6 +122,12 @@ interface PlayerContextValue {
   /** 영상 패널이 펼쳐져 있는지. 접으면 재생도 멈춘다 (약관: 영상은 보여야 한다) */
   videoExpanded: boolean;
   setVideoExpanded: (v: boolean) => void;
+  /**
+   * 영상 무대를 세울 씨앗 영상 ID (없으면 무대가 필요 없다).
+   * 무대를 그리는 곳(`VideoStage`)은 이 값만 보고 마운트한다 — 조건을 그리는 쪽에서
+   * 다시 계산하면 화면 구성이 바뀔 때마다 무대가 사라지는 사고가 난다 (docs/SSOT.md)
+   */
+  stageVideoId: string | null;
   /** 목록 재생 시작 — YouTube 전곡 재생을 시도한다 */
   playPlaylist: (queue: PlayerQueue, songId: number) => Promise<void>;
   registerYoutube: (api: YoutubeApi | null) => void;
@@ -742,6 +748,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [clearIfStill, playSong],
   );
 
+  const stageVideoId = useMemo(
+    () => stageSeed(queue, engine, playingId),
+    [queue, engine, playingId],
+  );
+
   const value = useMemo<PlayerContextValue>(
     () => ({
       playingId,
@@ -765,6 +776,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       engine,
       videoExpanded,
       setVideoExpanded,
+      stageVideoId,
       playPlaylist,
       registerYoutube,
       reportYoutubeError,
@@ -791,6 +803,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       engine,
       videoExpanded,
       setVideoExpanded,
+      stageVideoId,
       playPlaylist,
       registerYoutube,
       reportYoutubeError,

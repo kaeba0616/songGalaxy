@@ -50,6 +50,16 @@ export const PLACEMENT_NEIGHBORS = 8;
 export const YT_STAGE_READY_TIMEOUT_MS = 10_000;
 
 /**
+ * 영상 플레이어가 이보다 작아지면 안 되는 세로 하한(px).
+ *
+ * YouTube 개발자 정책이 플레이어를 200×200px보다 작게 표시하는 것을 금지한다.
+ * 좁은 화면에서 폭이 줄어든 채 16:9를 그대로 따르면 세로가 하한 밑으로 떨어진다 —
+ * 320px 폰에서 165px였다(실측). 그래서 컨테이너에 min-height로 세로를 지키고
+ * 남는 좌우는 YouTube가 검은 여백으로 채우게 둔다.
+ */
+export const VIDEO_MIN_PX = 200;
+
+/**
  * 영상 오류 폭주 차단 — 이 창(ms) 안에 오류가 이만큼 쌓이면 목록 전체를 미리듣기로 내린다.
  * 오류 → 다음 곡 → 오류가 iframe 로드 속도로 목록 전체를 태우는 것을 막는다.
  */

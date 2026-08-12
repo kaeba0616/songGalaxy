@@ -528,8 +528,9 @@ export default function GalaxyCanvas({
    * 진입당 한 번만 — 그러지 않으면 사용자가 ✕로 닫는 즉시 다시 열려버린다.
    *
    * 단, **노래 목록 재생(mode: "playlist")은 카드로 옮기지 않는다**. 카드 캐러셀은
-   * 30초 미리듣기 전용 UI이고, 이걸 띄우면 알약이 내려가면서 YouTube 무대까지 무너져
-   * 전곡 재생이 미리듣기 목록으로 바뀐다. 목록 재생 중에는 알약(과 영상)을 그대로 둔다.
+   * 성단을 훑는 30초 미리듣기 UI이지 내 노래 목록을 보여주는 자리가 아니다 —
+   * 옮기면 은하를 열자마자 내 목록이 성단인 척 깔린다. 목록은 알약이 그대로 들고 있는다.
+   * (영상 무대는 이제 알약 바깥에 있으므로 카드를 띄워도 무너지지 않는다 — VideoStage)
    */
   const cardsRestored = useRef(false);
   useEffect(() => {
@@ -1438,8 +1439,8 @@ export default function GalaxyCanvas({
       galaxySnapshot.current = null;
       if (snap) {
         void playerApiRef.current.restore(snap);
-        // 목록 재생은 카드로 옮기지 않는다 — 옮기면 알약과 영상 무대가 내려가
-        // 전곡 재생이 30초 미리듣기 캐러셀로 바뀐다 (위 복원 이펙트와 같은 이유)
+        // 목록 재생은 카드로 옮기지 않는다 — 캐러셀은 성단을 훑는 자리이지
+        // 내 노래 목록의 자리가 아니다 (위 복원 이펙트와 같은 이유)
         const q = snap.queue;
         showCards(q && q.mode !== "playlist" ? toCardsRef.current(q) : null);
       } else {

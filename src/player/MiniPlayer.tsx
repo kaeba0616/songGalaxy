@@ -8,6 +8,9 @@
  * 바를 끌어 원하는 자리로 옮길 수 있고(버튼 위에서 시작한 드래그는 무시),
  * ▲ 버튼으로 지금 듣고 있는 재생 목록을 펼쳐 볼 수 있다.
  * 옮긴 위치는 localStorage에 남아 다음 방문에도 유지된다.
+ *
+ * **영상 무대는 여기 있지 않다** (`VideoStage`). 이 알약은 은하가 카드 캐러셀을 띄우면
+ * 통째로 사라지는데, 무대가 자식이면 그때 같이 죽어 전곡 재생이 되살아나지 못한다.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ENRICH_BATCH } from "@/config/constants";
@@ -15,19 +18,9 @@ import { useLikes } from "@/likes/likes-context";
 import AddToPlaylist from "./AddToPlaylist";
 import Marquee from "./Marquee";
 import { usePlayer } from "./player-context";
-import YoutubeStage from "./YoutubeStage";
 
 /** 드래그로 옮긴 미니플레이어 위치 (뷰포트 좌상단 기준 px) */
 const POS_KEY = "songgalaxy-miniplayer-pos";
-/**
- * 영상 플레이어가 이보다 작아지면 안 된다.
- *
- * YouTube 개발자 정책이 플레이어를 200×200px보다 작게 표시하는 것을 금지한다.
- * 영상 폭은 알약을 따라가는데(w-full), 좁은 화면에서 폭이 max-w-92vw로 줄어든
- * 상태로 16:9를 그대로 따르면 세로가 하한 밑으로 떨어진다 — 320px 폰에서 165px였다(실측).
- * 그래서 컨테이너에 min-h를 걸어 세로를 지키고, 남는 좌우는 YouTube가 검은 여백으로 채운다.
- */
-const VIDEO_MIN_PX = 200;
 /** 화면 가장자리에서 최소한 남겨둘 여백 — 밖으로 완전히 나가지 않게 */
 const EDGE = 8;
 
@@ -70,11 +63,6 @@ export default function MiniPlayer() {
     toggle,
     playStep,
     uiHosted,
-    engine,
-    videoExpanded,
-    setVideoExpanded,
-    registerYoutube,
-    reportYoutubeError,
     notice,
   } = usePlayer();
   const { auth, toggleLike } = useLikes();
@@ -110,25 +98,6 @@ export default function MiniPlayer() {
 
   const songs = queue?.songs ?? NO_SONGS;
   const currentIndex = songs.findIndex((s) => s.id === playingId);
-
-  /**
-   * 영상 무대를 언제, 어떤 영상으로 걸어 둘지.
-   * `engine === "youtube"`가 된 뒤에 거는 것은 너무 늦다 — 무대가 없으면 영상 재생
-   * 요청 자체가 시작되지 못하고(무대는 재생을 눌러야 뜨는데 재생은 무대가 있어야
-   * 성공하는 교착), 무대가 뜬 뒤에도 IFrame 스크립트를 내려받는 시간이 더 걸린다.
-   * 그래서 "목록 큐가 잡힌 순간"부터 미리 걸어 데워 둔다.
-   * 접었다고 내리지도 않는다 — 내리면 손잡이가 사라져 다시 펼칠 수 없다.
-   *
-   * 영상 ID를 함께 넘기는 이유: 빈 플레이어는 onReady를 보내지 않는다(YoutubeStage 주석).
-   * 지금 곡에 ID가 없으면(미리듣기로 떨어진 곡) 목록에서 ID 있는 첫 곡을 씨앗으로 쓴다 —
-   * 무대를 세워 두는 것이 목적이고, 실제로 틀 영상은 Provider가 load()로 갈아 끼운다.
-   */
-  const stageVideoId =
-    (playingId !== null ? songs.find((s) => s.id === playingId)?.youtubeVideoId : null) ??
-    songs.find((s) => s.youtubeVideoId)?.youtubeVideoId ??
-    null;
-  const stageMounted =
-    (engine === "youtube" || queue?.mode === "playlist") && stageVideoId !== null;
 
   // 목록 재생은 영상 ID가 있으면 /api/enrich를 건너뛴다 — 그래서 앨범아트가 비어 있다.
   // 지금 듣는 곡 것만 따로 채워 원반이 ✦ 자리표시자로 남지 않게 한다
@@ -285,54 +254,6 @@ export default function MiniPlayer() {
 
       {addOpen && playingId !== null && (
         <AddToPlaylist songId={playingId} onClose={() => setAddOpen(false)} />
-      )}
-
-      {/* 목록 재생 중에는 영상이 보여야 한다 (약관). 접으면 재생도 멈춘다.
-          접혀 있어도 무대는 DOM에 남긴다 — 내리면 손잡이가 사라져 이어 들을 수 없다.
-          감춘 동안에는 Provider가 반드시 멈춘 상태로 유지한다 */}
-      {stageMounted && (
-        <div
-          data-nodrag
-          className={
-            videoExpanded
-              ? "mb-2 w-full overflow-hidden rounded-2xl border border-white/15 bg-black shadow-xl"
-              : "hidden"
-          }
-        >
-          {/* min-h: 좁은 화면에서 16:9를 그대로 두면 세로가 정책 하한 밑으로 떨어진다.
-              세로를 지키고 남는 좌우는 YouTube가 검은 여백으로 채운다 (위 주석 참조) */}
-          <div className="aspect-video w-full" style={{ minHeight: VIDEO_MIN_PX }}>
-            <YoutubeStage
-              videoId={stageVideoId}
-              register={registerYoutube}
-              onEnded={() => void playStep(1)}
-              // 건너뛰지 않는다 — 임베드가 막힌 영상 하나로 그 곡을 모든 목록에서
-              // 영영 잃는다. Provider가 그 곡만 미리듣기로 떨어뜨린다
-              onError={reportYoutubeError}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => setVideoExpanded(false)}
-            className="w-full cursor-pointer py-1.5 text-xs text-white/50 transition hover:bg-white/10 hover:text-white"
-          >
-            영상 접기 (재생이 멈춥니다)
-          </button>
-        </div>
-      )}
-
-      {/* 펼치기는 toggle에만 맡긴다 — 여기서 setVideoExpanded(true)를 먼저 부르면,
-          무대가 아직 다시 서는 중일 때 패널만 펼쳐진 채 이 버튼이 사라져 되돌릴 길이 없다.
-          toggle은 손잡이가 있으면 펼치며 재생하고, 없으면 곡을 다시 요청해 둔다.
-          어느 쪽이든 소리가 실제로 나기 시작할 때 비로소 펼쳐지므로 이 버튼도 그때 사라진다 */}
-      {engine === "youtube" && !videoExpanded && (
-        <button
-          type="button"
-          onClick={toggle}
-          className="mb-2 w-full cursor-pointer rounded-full border border-white/15 bg-black/80 py-1.5 text-xs text-white/70 backdrop-blur transition hover:bg-white/10"
-        >
-          영상 펼치고 이어 듣기
-        </button>
       )}
 
       {/* 재생 방식이 바뀐 이유 한 줄 — 영상이 계속 실패해 미리듣기로 내려온 경우 */}
