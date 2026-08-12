@@ -16,14 +16,22 @@ export async function listPlanetDecor(userId: number): Promise<string[]> {
   return rows.map((r) => r.slug).filter(isDecorSlug);
 }
 
-/** 켜고 끄기. 켜졌으면 true. 카탈로그에 없는 slug는 아무 일도 하지 않고 false */
-export async function togglePlanetDecor(userId: number, slug: string): Promise<boolean> {
-  if (!isDecorSlug(slug)) return false;
-  const deleted = await db
+/**
+ * 꾸미기를 켜거나 끈다. "뒤집기"가 아니라 **원하는 상태를 받는다** —
+ * 뒤집기로 만들면 칩을 빠르게 두 번 누를 때 먼저 도착한 요청이 지우고
+ * 나중 요청이 "없으니 넣자"로 되살려, 끄려던 것이 켜진 채 남는다.
+ * 같은 요청이 몇 번 가도 결과가 같아야 한다.
+ */
+export async function setPlanetDecor(userId: number, slug: string, on: boolean): Promise<void> {
+  if (!isDecorSlug(slug)) return;
+  if (on) {
+    await db
+      .insert(schema.planetDecor)
+      .values({ userId, slug })
+      .onConflictDoNothing({ target: [schema.planetDecor.userId, schema.planetDecor.slug] });
+    return;
+  }
+  await db
     .delete(schema.planetDecor)
-    .where(and(eq(schema.planetDecor.userId, userId), eq(schema.planetDecor.slug, slug)))
-    .returning({ slug: schema.planetDecor.slug });
-  if (deleted.length > 0) return false; // 켜져 있던 것을 껐다
-  await db.insert(schema.planetDecor).values({ userId, slug }).onConflictDoNothing();
-  return true;
+    .where(and(eq(schema.planetDecor.userId, userId), eq(schema.planetDecor.slug, slug)));
 }
