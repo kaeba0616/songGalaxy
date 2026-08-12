@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSessionUser } from "@/auth";
+import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits from "@/components/DataCredits";
 import PlaylistEditor from "@/components/PlaylistEditor";
 import { getPlaylistById, retryMissingVideos } from "@/server/playlists";
@@ -34,9 +35,15 @@ export default async function PlaylistDetailPage(props: {
   return (
     <main className="min-h-dvh bg-[#05060f] px-5 py-8 text-white">
       <div className="mx-auto max-w-3xl">
-        <Link href="/lists" className="text-sm text-white/50 transition hover:text-white">
-          ← 내 목록
-        </Link>
+        {/* 겹쳐 띄운 화면에는 ✕가 있지만 주소로 직접 열면 없다 — 그때 여기서 은하로
+            나가는 길이 "← 내 목록"을 거치는 두 번 클릭뿐이었다. BackToGalaxyLink는
+            오버레이 안에서는 스스로 아무것도 그리지 않으므로 출구가 둘로 보이지 않는다 */}
+        <div className="flex items-center justify-between gap-4">
+          <Link href="/lists" className="text-sm text-white/50 transition hover:text-white">
+            ← 내 목록
+          </Link>
+          <BackToGalaxyLink className="text-sm text-white/50 transition hover:text-white" />
+        </div>
         <PlaylistEditor
           // 409 뒤 router.refresh()가 새 목록을 내려도 useState(initial)은 첫 값을
           // 붙잡고 있어, key로 다시 마운트시켜야 복구가 실제로 일어난다
