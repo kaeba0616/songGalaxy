@@ -23,7 +23,7 @@ import type { PlayerQueue, PlayerSnapshot } from "@/player/player-context";
 import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
 import { buildDecor } from "./planet-decor-objects";
 import { PLANET_DECOR } from "@/config/planet-decor";
-import { GROUND_RADIUS, WALK_SPEED, surfaceNormal, walkStep } from "./planet-walk";
+import { GROUND_CENTER_OFFSET, GROUND_RADIUS, WALK_SPEED, surfaceNormal, walkStep } from "./planet-walk";
 import WalkStick from "./WalkStick";
 
 const GALAXY_BG = "#05060f";
@@ -1043,12 +1043,13 @@ export default function GalaxyCanvas({
       ArrowLeft: "left", KeyA: "left",
       ArrowRight: "right", KeyD: "right",
     };
-    /** 글자를 치는 중이면 방향키를 뺏지 않는다 — 프로필 편집 입력칸이 먹통이 된다 */
-    const typing = (el: EventTarget | null): boolean => {
-      const t = el as HTMLElement | null;
-      const tag = t?.tagName;
-      return tag === "INPUT" || tag === "TEXTAREA" || t?.isContentEditable === true;
-    };
+    /** 글자를 치는 중이거나 폼 컨트롤을 조작 중이면 방향키를 뺏지 않는다 —
+     * <select>가 빠져 있으면 대표곡 드롭다운에서 ↓로 옵션을 넘길 수가 없고(그
+     * 대신 방향키가 걷기로 새 버려 preventDefault까지 걸린다), closest()가 아니라
+     * tagName만 보면 contenteditable 안의 자식 요소(span 등)에 포커스가 있을 때
+     * 놓친다 */
+    const typing = (el: EventTarget | null): boolean =>
+      el instanceof Element && el.closest("input, textarea, select, [contenteditable]") != null;
     const onWalkKey = (e: KeyboardEvent, down: boolean) => {
       if (!skyActive || typing(e.target)) return;
       const k = WALK_KEY[e.code];
@@ -1140,8 +1141,11 @@ export default function GalaxyCanvas({
           uniform float uTime;
           varying vec3 vLocal;
           void main() {
-            // 착륙 지점은 구의 꼭대기 — 로컬 (0, 300, 0)
-            float d = distance(vLocal, vec3(0.0, 300.0, 0.0));
+            // 착륙 지점은 구의 꼭대기 — 로컬 (0, GROUND_RADIUS, 0).
+            // GROUND_RADIUS(SSOT: planet-walk.ts)를 문자열로 보간한다 — GLSL은
+            // 정수 리터럴을 float 유니폼과 못 섞으므로 toFixed(1)로 소수점을 강제한다
+            // (안 그러면 300 같은 정수가 셰이더 컴파일을 조용히 런타임에서만 깨뜨린다)
+            float d = distance(vLocal, vec3(0.0, ${GROUND_RADIUS.toFixed(1)}, 0.0));
             float pulse = 0.85 + 0.15 * sin(uTime * 1.4);
             // 발밑(별의 심장)에서 배어나오는 별빛 — 멀어질수록 잦아든다
             vec3 col = uGround + uStarGlow * exp(-d / 60.0) * 0.85 * pulse;
@@ -1154,8 +1158,8 @@ export default function GalaxyCanvas({
       // 자식을 반드시 **로컬 좌표**로 넣어야 한다: rotateOnWorldAxis는 객체의 원점을
       // 지나는 축으로 도는데, 그 원점이 곧 이 피벗의 위치(=구의 중심)이기 때문이다
       planetPivot = new THREE.Group();
-      planetPivot.position.copy(C).addScaledVector(up, -298.5); // 꼭대기가 발밑 ~1.5 아래
-      const ground = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 24), groundMat);
+      planetPivot.position.copy(C).addScaledVector(up, -GROUND_CENTER_OFFSET); // 꼭대기가 발밑 ~1.5 아래
+      const ground = new THREE.Mesh(new THREE.SphereGeometry(GROUND_RADIUS, 48, 24), groundMat);
       planetPivot.add(ground); // 로컬 (0,0,0) = 구의 중심
       skyGroup.add(planetPivot);
 

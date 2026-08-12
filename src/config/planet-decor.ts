@@ -7,6 +7,7 @@
  * 둘을 잇는 것은 slug다.
  */
 import { hashString, mulberry32 } from "@/lib/layout-math";
+import { GROUND_CENTER_OFFSET, GROUND_RADIUS } from "@/galaxy/planet-walk";
 
 export interface PlanetDecorItem {
   slug: string;
@@ -35,10 +36,6 @@ export const PLANET_DECOR: PlanetDecorItem[] = [
 export function isDecorSlug(slug: string): boolean {
   return PLANET_DECOR.some((d) => d.slug === slug);
 }
-
-/** 지면 구의 반경과 중심 깊이 — enterSky가 만드는 지면과 같은 값이어야 한다 */
-const GROUND_RADIUS = 300;
-const GROUND_CENTER_BELOW = 298.5;
 
 /**
  * 오브젝트가 놓일 자리. 좌표를 저장하지 않고 매번 여기서 다시 만든다 —
@@ -82,6 +79,6 @@ export function decorPlacement(
  * 300을 넘으면 sqrt가 NaN이 되어 오브젝트가 화면에서 사라지므로 가장자리로 묶는다.
  */
 export function groundHeightOffset(distance: number): number {
-  if (distance >= GROUND_RADIUS) return -GROUND_CENTER_BELOW;
-  return Math.sqrt(GROUND_RADIUS * GROUND_RADIUS - distance * distance) - GROUND_CENTER_BELOW;
+  if (distance >= GROUND_RADIUS) return -GROUND_CENTER_OFFSET;
+  return Math.sqrt(GROUND_RADIUS * GROUND_RADIUS - distance * distance) - GROUND_CENTER_OFFSET;
 }

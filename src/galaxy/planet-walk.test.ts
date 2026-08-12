@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { GROUND_RADIUS, WALK_SPEED, surfaceNormal, walkStep } from "./planet-walk";
+import { GROUND_CENTER_OFFSET, GROUND_RADIUS, WALK_SPEED, surfaceNormal, walkStep } from "./planet-walk";
 
 const UP = { x: 0, y: 1, z: 0 };
 /** 화면 안쪽(-Z)을 보고 서 있는 상태 — three의 기본 카메라 방향 */
@@ -81,6 +81,14 @@ describe("walkStep", () => {
     near(l.axis.z, -r.axis.z);
     const f = walkStep(LOOK, UP, { ...NONE, forward: true }, 0.016, WALK_SPEED, GROUND_RADIUS);
     near(f.axis.x * r.axis.x + f.axis.y * r.axis.y + f.axis.z * r.axis.z, 0, "앞과 옆의 축은 수직");
+  });
+});
+
+describe("GROUND_CENTER_OFFSET", () => {
+  it("GROUND_RADIUS에서 파생된다 — 반경이 바뀌어도 눈높이(1.5) 관계가 깨지지 않는다", () => {
+    // planet-decor.ts의 groundHeightOffset(0)이 여전히 +1.5를 내야 하므로
+    // (SSOT: GalaxyCanvas·planet-decor.ts가 이 값을 그대로 가져다 쓴다)
+    near(GROUND_RADIUS - GROUND_CENTER_OFFSET, 1.5, "반경 - 중심 오프셋 = 눈높이");
   });
 });
 

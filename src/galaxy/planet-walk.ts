@@ -24,8 +24,22 @@ export interface WalkKeys {
 
 /** 표면 이동 속도(초당). 둘레 2π×300 = 1885이므로 한 바퀴 약 47초 */
 export const WALK_SPEED = 40;
-/** 지면 구의 반경 — enterSky가 만드는 지면과 같은 값이어야 한다 */
+/**
+ * 지면 구의 반경 — 유일한 원본(SSOT: docs/SSOT.md). GalaxyCanvas의 지면
+ * SphereGeometry·착륙점 셰이더 유니폼(GLSL 템플릿 문자열에 보간해 써야 하며,
+ * 정수 리터럴은 float 유니폼과 안 섞이므로 `GROUND_RADIUS.toFixed(1)`로 넣는다)과
+ * planet-decor.ts(서버도 읽으므로 여기서 import — three는 안 들어온다)가 여기서 가져다 쓴다.
+ */
 export const GROUND_RADIUS = 300;
+/** 서 있는 지점이 지면 표면보다 이만큼 위에 있다는 뜻(눈높이) */
+const EYE_HEIGHT = 1.5;
+/**
+ * 지면 구의 중심이 서 있는 지점(피벗 원점)보다 얼마나 아래에 있는지.
+ * GROUND_RADIUS에서 파생시킨다 — 반경을 바꿔도 두 값이 따로 놀지 않는다
+ * (예전엔 298.5를 따로 손으로 적어야 해서, 반경만 바꾸고 이 값을 깜빡하면
+ * 지면이 눈높이에서 어긋나 발이 땅에 파묻히거나 붕 뜬 채로 보였다).
+ */
+export const GROUND_CENTER_OFFSET = GROUND_RADIUS - EYE_HEIGHT;
 
 const dot = (a: Vec3, b: Vec3): number => a.x * b.x + a.y * b.y + a.z * b.z;
 const cross = (a: Vec3, b: Vec3): Vec3 => ({
