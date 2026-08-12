@@ -213,10 +213,19 @@ body {
 /* 영상 레일/카드가 서 있는 동안 콘텐츠 본문이 그 아래로 깔리지 않게 자리를 비운다.
    값은 VideoStage가 자기 크기를 재서 채운다 (없으면 0).
 
+   padding이 아니라 margin을 쓴다: 이 파일은 `@import "tailwindcss"` 뒤에 이어지는
+   레이어 밖(unlayered) 규칙인데, 각 페이지의 `px-5`/`py-8`은 Tailwind의
+   `@layer utilities` 안에 있다. CSS Cascade Layers 규칙상 레이어 밖 선언은 같은
+   속성이면 특이도와 무관하게 레이어 안 선언을 항상 이긴다 — padding으로 쓰면 이
+   규칙이 각 페이지의 padding을 겹쳐 더하는 게 아니라 통째로 덮어써 버린다(영상이
+   없어 --video-rail-h가 0px인 평소에도 위쪽 padding이 사라진다). margin은 어느
+   <main>도 쓰지 않는 속성이라 겹칠 것이 없다 — body 배경(#05060f)이 각 페이지의
+   bg-[#05060f]와 같은 색이라 margin으로 드러나는 여백도 이음매 없이 자연스럽다.
+
    은하(/, /planet/[id])는 <main>을 쓰지 않고 GalaxyCanvas를 그대로 렌더하므로
    이 규칙에 걸리지 않는다 — 전체 화면 캔버스 위에는 겹치는 것이 맞고, 캔버스는
    window.resize만 듣기 때문에 폭을 밀면 다음 창 크기 변경 전까지 늘어난 채 남는다. */
 main {
-  padding-right: var(--video-rail-w, 0px);
-  padding-top: var(--video-rail-h, 0px);
+  margin-right: var(--video-rail-w, 0px);
+  margin-top: var(--video-rail-h, 0px);
 }
