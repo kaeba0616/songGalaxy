@@ -21,6 +21,7 @@ import { useLikes } from "@/likes/likes-context";
 import { usePlayer } from "@/player/player-context";
 import type { PlayerQueue, PlayerSnapshot } from "@/player/player-context";
 import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
+import { buildDecor } from "./planet-decor-objects";
 
 const GALAXY_BG = "#05060f";
 /** 카메라 초기/리셋 거리 (전체 보기) */
@@ -1012,14 +1013,14 @@ export default function GalaxyCanvas({
     let hoveredK = -1; // 호버 중인 밤하늘 별 인덱스
     let skyLabels: { el: HTMLDivElement; pos: THREE.Vector3 }[] = [];
     let landingTimers: number[] = [];
-    let pendingSky: { entry: StarEntry; songIds: number[] | null } | null = null;
+    let pendingSky: { entry: StarEntry; songIds: number[] | null; decor: string[] } | null = null;
     let flightDone = false;
     // 유성 (동물의 숲 감성 포인트)
     let meteor: { obj: THREE.Points; from: THREE.Vector3; to: THREE.Vector3; start: number } | null = null;
     let meteorNextAt = 0;
 
     /** 밤하늘 진입 — 전용 스카이돔 씬 구성 */
-    const enterSky = (entry: StarEntry, songIds: number[]) => {
+    const enterSky = (entry: StarEntry, songIds: number[], decor: string[]) => {
       if (!payload || !positions) return;
       skyActive = true;
       skyStarPos = entry.cur.clone();
@@ -1140,6 +1141,13 @@ export default function GalaxyCanvas({
           new THREE.MeshBasicMaterial({ color: silColor, side: THREE.DoubleSide }),
         );
         skyGroup.add(sil);
+      }
+
+      // 2-2) 주인이 놓은 꾸미기 오브젝트 (SSOT: src/config/planet-decor.ts).
+      // skyGroup에 넣어야 행성을 나갈 때 아래 dispose 경로를 함께 탄다
+      for (const slug of decor) {
+        const obj = buildDecor(slug, entry.data.userId, C, planet);
+        if (obj) skyGroup.add(obj);
       }
 
       // 3) 장식 잔별 900개 — 각자 위상이 다른 반짝임 (배경 별 셰이더와 동일 패턴)
@@ -1317,10 +1325,10 @@ export default function GalaxyCanvas({
     /** 착륙 시퀀스: 접근 비행 → 진입 플래시 → 밤하늘 (준비되면 진입, 클릭 시 스킵) */
     const applySkyIfReady = () => {
       if (pendingSky && flightDone && pendingSky.songIds != null) {
-        const { entry, songIds } = pendingSky;
+        const { entry, songIds, decor } = pendingSky;
         pendingSky = null;
         flightDone = false;
-        enterSky(entry, songIds);
+        enterSky(entry, songIds, decor);
         window.setTimeout(() => setFlash(false), 250);
       }
     };
@@ -1328,7 +1336,7 @@ export default function GalaxyCanvas({
       if (skyActive || pendingSky) return;
       // 은하에서 듣던 곡을 기억 — 착륙하면 행성 라디오로 바뀌고, 나올 때 여기서 이어 듣는다
       galaxySnapshot.current = playerApiRef.current.snapshot();
-      pendingSky = { entry, songIds: null };
+      pendingSky = { entry, songIds: null, decor: [] };
       showCards(null);
       setSkyInfo({ userId: entry.data.userId, nickname: entry.data.nickname });
       // 좋아요 목록·행성 정보는 비행하는 동안 미리 로드
@@ -1342,6 +1350,7 @@ export default function GalaxyCanvas({
             clusters?: PlanetInfo["clusters"];
             bio?: string | null;
             pinnedSongId?: number | null;
+            decor?: string[];
           }) => {
             if (pendingSky?.entry === entry) {
               let songIds = d.songIds ?? [];
@@ -1350,6 +1359,7 @@ export default function GalaxyCanvas({
                 songIds = [d.pinnedSongId, ...songIds.filter((id) => id !== d.pinnedSongId)];
               }
               pendingSky.songIds = songIds;
+              pendingSky.decor = d.decor ?? [];
               setSkyInfo((prev) =>
                 prev?.userId === entry.data.userId
                   ? {
@@ -1877,6 +1887,14 @@ export default function GalaxyCanvas({
         if (skyTwinkleMat) skyTwinkleMat.uniforms.uTime.value = t;
         if (skyRingMat) skyRingMat.uniforms.uTime.value = t;
         if (skyGroundMat) skyGroundMat.uniforms.uTime.value = t;
+        // 등대 빛줄기 — 이름으로 찾아 돌린다. 오브젝트마다 갱신 함수를 들고 다니게 하면
+        // 씬 그래프와 별개인 목록을 하나 더 관리해야 하고, 정리에서 새기 쉽다
+        if (skyGroup) {
+          for (const o of skyGroup.children) {
+            const spin = o.getObjectByName("decor-spin");
+            if (spin) spin.rotation.y += 0.004;
+          }
+        }
         if (meteor && skyStarPos) {
           const m = meteor;
           const mat = m.obj.material as THREE.PointsMaterial;
