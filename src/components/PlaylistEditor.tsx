@@ -156,10 +156,10 @@ export default function PlaylistEditor({
         return;
       }
       removeFromQueue(playlistId, songId);
-      // 서버는 이미 바뀌었다 — 화면(과 위의 재생 버튼이 쓰는 이 songs state)도
-      // 서버 렌더와 다시 맞춘다. key={songIds.join(",")}가 걸려 있어 이 refresh가
-      // 내려주는 새 songs로 컴포넌트가 다시 마운트된다
-      router.refresh();
+      // 성공한 뒤에는 굳이 서버에서 다시 받아오지 않는다. 이 화면의 songs state가
+      // 이미 정답이고(재생 버튼도 이 state를 쓴다), refresh를 걸면 늦게 도착한 RSC가
+      // key를 바꿔 그 사이에 성공한 정렬을 옛 순서로 되돌려 보인다.
+      // 낡은 화면을 되살리는 일은 409 경로의 refresh 한 곳만 맡는다
     } catch {
       setSongs(before);
       setError("곡을 빼지 못했어요");
