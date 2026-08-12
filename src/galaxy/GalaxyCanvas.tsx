@@ -2039,8 +2039,10 @@ export default function GalaxyCanvas({
         </div>
       )}
 
-      {/* 데스크톱 전용 — 모바일에서는 아래 햄버거 버튼이 대신한다 */}
-      <div className="absolute right-4 top-4 z-10 hidden gap-2 sm:flex">
+      {/* 데스크톱 전용 — 모바일에서는 아래 햄버거 버튼이 대신한다.
+          영상 레일이 서면 우측 상단이 레일 밑으로 들어간다 — 레일 폭만큼 왼쪽으로 비킨다
+          (레일이 없으면 --video-rail-w가 0px라 right-4와 같다) */}
+      <div className="absolute right-[calc(1rem+var(--video-rail-w,0px))] top-4 z-10 hidden gap-2 sm:flex">
         {authState.authenticated ? (
           /* 닉네임 클릭 → 버튼 아래에 붙는 계정 드롭다운 */
           <button
@@ -2075,8 +2077,10 @@ export default function GalaxyCanvas({
             (행성에서 나가는 길은 드롭다운의 "은하로 나가기"가 유일한 창구다) */}
       </div>
 
-      {/* 모바일 — 버튼 하나로 같은 드롭다운 열기 */}
-      <div className="absolute right-4 top-4 z-10 sm:hidden">
+      {/* 모바일 — 버튼 하나로 같은 드롭다운 열기.
+          sm 미만에서는 영상이 레일이 아니라 위쪽 카드(top-20)라 --video-rail-w가 0px —
+          그래도 데스크톱과 같은 식을 써 두면 나중에 변수 쪽 계산이 바뀌어도 안전하다 */}
+      <div className="absolute right-[calc(1rem+var(--video-rail-w,0px))] top-4 z-10 sm:hidden">
         <button
           type="button"
           onClick={(e) => toggleMenu(e.currentTarget)}
@@ -2385,10 +2389,14 @@ export default function GalaxyCanvas({
         </div>
       )}
 
-      {/* 하단 곡 카드 캐러셀 (성단/세부 장르 클릭 시) */}
+      {/* 하단 곡 카드 캐러셀 (성단/세부 장르 클릭 시).
+          우측 안쪽 여백(pr)으로 영상 레일 폭만큼 비킨다 — 헤더의 접기/닫기 버튼과
+          캐러셀의 "다음" 화살표(오른쪽 absolute)가 이 컨테이너 안에서 우측 정렬되므로,
+          바깥(inset-x-0)은 그대로 두고 안쪽만 좁혀야 배경은 레일 밑까지 자연스럽게
+          이어지면서 버튼만 레일 밖으로 나온다. 레일이 없으면 --video-rail-w가 0px */}
       {cards && (
         <div
-          className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pb-4 pt-8 transition-transform duration-300 ease-out"
+          className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pb-4 pt-8 pr-[var(--video-rail-w,0px)] transition-transform duration-300 ease-out"
           style={{
             /* 접힘: 상단 여백(pt-8) + 곡 정보 줄(h-10) + 재생 컨트롤 줄만 남긴다 */
             transform: cardsCollapsed ? "translateY(calc(100% - 6.75rem))" : "translateY(0)",

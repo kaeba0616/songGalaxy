@@ -32,7 +32,9 @@ export default function RouteOverlay({ children }: { children: React.ReactNode }
         type="button"
         onClick={() => router.back()}
         aria-label="닫고 은하로 돌아가기"
-        className="fixed right-4 top-4 z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-full border border-white/20 bg-black/60 text-white/70 backdrop-blur transition hover:bg-white/15 hover:text-white"
+        /* 영상 레일이 서면(sm 이상) 우측 상단이 레일 밑으로 들어간다 — 레일 폭(--video-rail-w)만큼
+           왼쪽으로 비킨다. 레일이 없으면(변수 0px) right-4와 동일 */
+        className="fixed right-[calc(1rem+var(--video-rail-w,0px))] top-4 z-10 grid h-9 w-9 cursor-pointer place-items-center rounded-full border border-white/20 bg-black/60 text-white/70 backdrop-blur transition hover:bg-white/15 hover:text-white"
       >
         ✕
       </button>
