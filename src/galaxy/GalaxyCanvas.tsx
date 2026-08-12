@@ -1469,6 +1469,9 @@ export default function GalaxyCanvas({
 
     /** 밤하늘에서 은하로 복귀 */
     const exitSky = () => {
+      // 방향키/조이스틱을 누른 채로 나가면 keyup·pointerup이 갈 곳이 없어져
+      // 굳는다 — 나가는 모든 경로가 여길 지나가므로 조기 return보다 앞에 둔다
+      walkKeys.forward = walkKeys.back = walkKeys.left = walkKeys.right = false;
       landingTimers.forEach(clearTimeout);
       landingTimers = [];
       pendingSky = null;
@@ -2495,7 +2498,8 @@ export default function GalaxyCanvas({
         className={`pointer-events-none absolute bottom-4 left-4 hidden rounded-full border border-white/10 bg-black/40 backdrop-blur ${skyInfo ? "" : "sm:block"}`}
       />
 
-      {/* 밤하늘에서만, 좁은 화면에서만 — PC는 방향키로 걷는다.
+      {/* 밤하늘에서만, 터치(coarse pointer)에서만 — 표시 여부는 WalkStick 내부에서
+          판정한다. 마우스/트랙패드 기기는 화면이 좁아도 키보드가 있으니 방향키로 걷는다.
           좌하단은 밤하늘에서 미니맵이 숨겨져 비어 있는 자리다 */}
       {skyInfo && (
         <WalkStick

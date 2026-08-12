@@ -8,7 +8,7 @@
  * 방향을 각도가 아니라 네 개의 불리언으로 넘기는 이유는 키보드와 같은 통로를
  * 쓰기 위해서다 — 둘을 따로 두면 이동 규칙이 두 벌이 된다.
  */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 
 export interface StickValue {
   forward: boolean;
@@ -23,26 +23,22 @@ const DEAD_ZONE = 12;
 /** 손잡이가 밖으로 나가지 않는 반경 */
 const MAX_PULL = 44;
 
+// matchMedia는 서버에 없다 — useSyncExternalStore로 읽으면 SSR·hydration 첫 렌더는
+// 항상 getServerSnapshot(false)을 쓰고, 실제 값은 hydration 직후에 반영되어
+// 서버·클라이언트 첫 렌더가 어긋나는 mismatch가 나지 않는다. 값이 바뀌는 걸
+// 구독하지는 않는다 — GalaxyCanvas의 (pointer: coarse) 판정도 최초 1회만 읽는다
+const subscribeNoop = () => () => {};
+const getIsCoarseSnapshot = () => window.matchMedia("(pointer: coarse)").matches;
+const getIsCoarseServerSnapshot = () => false;
+
 export default function WalkStick({ onChange }: { onChange: (v: StickValue) => void }) {
   const baseRef = useRef<HTMLDivElement>(null);
   const originRef = useRef<{ x: number; y: number } | null>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
 
-  // 최신 onChange를 언마운트 클린업에서 쓰기 위한 참조 — 클린업은 마운트 때의
-  // 클로저를 그대로 들고 있어서, deps 없이 최신 콜백을 참조하려면 ref가 필요하다.
-  // 렌더 중에는 ref를 쓰지 않는다 — 이펙트에서만 갱신한다
-  const onChangeRef = useRef(onChange);
-  useEffect(() => {
-    onChangeRef.current = onChange;
-  });
-  useEffect(() => {
-    return () => {
-      // 조이스틱을 누른 채로 화면이 사라지면(행성→행성 바로 이동 등)
-      // pointerup/cancel이 이 엘리먼트에 오지 못한다 — 언마운트 때도 반드시
-      // 비워야 다음 행성에 도착하자마자 안 누른 방향으로 계속 걷지 않는다
-      onChangeRef.current(NONE);
-    };
-  }, []);
+  // (pointer: coarse)는 주 포인터 기준이라 터치스크린 노트북(주 포인터가
+  // 트랙패드라 fine)에서는 그대로 숨어 키보드 경로를 쓴다
+  const isCoarse = useSyncExternalStore(subscribeNoop, getIsCoarseSnapshot, getIsCoarseServerSnapshot);
 
   const send = (v: StickValue) => onChange(v);
 
@@ -94,6 +90,9 @@ export default function WalkStick({ onChange }: { onChange: (v: StickValue) => v
     send(NONE);
   };
 
+  // SSR·hydration 직후(false)거나 주 포인터가 fine이면(마우스/트랙패드 = 키보드 있음) 그리지 않는다
+  if (!isCoarse) return null;
+
   return (
     <div
       ref={baseRef}
@@ -103,7 +102,7 @@ export default function WalkStick({ onChange }: { onChange: (v: StickValue) => v
       onPointerCancel={end}
       aria-label="행성 위 이동"
       /* touch-none: 없으면 브라우저가 스크롤 제스처로 가져가 조작이 끊긴다 */
-      className="absolute bottom-4 left-4 z-10 grid h-28 w-28 touch-none place-items-center rounded-full border border-white/15 bg-black/35 backdrop-blur sm:hidden"
+      className="absolute bottom-4 left-4 z-10 grid h-28 w-28 touch-none place-items-center rounded-full border border-white/15 bg-black/35 backdrop-blur"
     >
       <div
         style={{ transform: `translate(${knob.x}px, ${knob.y}px)` }}
