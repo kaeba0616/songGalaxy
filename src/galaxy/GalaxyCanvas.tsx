@@ -23,7 +23,7 @@ import type { PlayerQueue, PlayerSnapshot } from "@/player/player-context";
 import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
 import { buildDecor } from "./planet-decor-objects";
 import { PLANET_DECOR } from "@/config/planet-decor";
-import { surfaceNormal } from "./planet-walk";
+import { GROUND_RADIUS, WALK_SPEED, surfaceNormal, walkStep } from "./planet-walk";
 
 const GALAXY_BG = "#05060f";
 /** 카메라 초기/리셋 거리 (전체 보기) */
@@ -153,6 +153,8 @@ export default function GalaxyCanvas({
   /** 씬의 유저 별 갱신 API (three 이펙트가 채움) */
   const starApiRef = useRef<((star: GalaxyStar) => void) | null>(null);
   const flyToPosRef = useRef<((x: number, y: number, z: number, dist: number) => void) | null>(null);
+  /** 이동 입력 — 키보드(three 이펙트)와 조이스틱(React)이 같은 객체에 쓴다 */
+  const walkKeysRef = useRef({ forward: false, back: false, left: false, right: false });
   // 로그인·좋아요·내 별 상태의 단일 원본 (SSOT: src/likes/likes-context.tsx).
   // 미니플레이어의 ♥와 같은 상태를 봐야 하므로 컨텍스트에서 받아 쓴다.
   const {
@@ -1022,10 +1024,52 @@ export default function GalaxyCanvas({
     let meteor: { obj: THREE.Points; from: THREE.Vector3; to: THREE.Vector3; start: number } | null = null;
     let meteorNextAt = 0;
 
+    // 걷기: 프레임 루프가 매 프레임 읽는 경과 시간과 재사용 벡터.
+    // 매 프레임 새 벡터를 만들면 GC가 튀고, enterSky가 lastWalkAt을 쓰므로
+    // enterSky 정의보다 위여야 한다
+    let lastWalkAt = performance.now();
+    const walkDir = new THREE.Vector3();
+    const walkAxis = new THREE.Vector3();
+
+    // 눌려 있는 이동 키. 프레임 루프가 매 프레임 읽는다 — keydown 반복 이벤트로
+    // 움직이면 OS의 키 반복 속도에 따라 걸음이 달라진다.
+    // ref에 두는 이유: 다음 태스크의 모바일 조이스틱은 React 쪽에서 같은 값을
+    // 채워야 하는데, 이펙트 안의 지역 객체면 닿을 수가 없다
+    const walkKeys = walkKeysRef.current;
+    const WALK_KEY: Record<string, keyof typeof walkKeys> = {
+      ArrowUp: "forward", KeyW: "forward",
+      ArrowDown: "back", KeyS: "back",
+      ArrowLeft: "left", KeyA: "left",
+      ArrowRight: "right", KeyD: "right",
+    };
+    /** 글자를 치는 중이면 방향키를 뺏지 않는다 — 프로필 편집 입력칸이 먹통이 된다 */
+    const typing = (el: EventTarget | null): boolean => {
+      const t = el as HTMLElement | null;
+      const tag = t?.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || t?.isContentEditable === true;
+    };
+    const onWalkKey = (e: KeyboardEvent, down: boolean) => {
+      if (!skyActive || typing(e.target)) return;
+      const k = WALK_KEY[e.code];
+      if (!k) return;
+      e.preventDefault(); // 방향키로 페이지가 스크롤되지 않게
+      walkKeys[k] = down;
+    };
+    const onKeyDown = (e: KeyboardEvent) => onWalkKey(e, true);
+    const onKeyUp = (e: KeyboardEvent) => onWalkKey(e, false);
+    /** 창을 벗어나면 누른 채로 굳는다 — 돌아왔을 때 혼자 걸어가지 않게 비운다 */
+    const onBlur = () => {
+      walkKeys.forward = walkKeys.back = walkKeys.left = walkKeys.right = false;
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+
     /** 밤하늘 진입 — 전용 스카이돔 씬 구성 */
     const enterSky = (entry: StarEntry, songIds: number[], decor: string[]) => {
       if (!payload || !positions) return;
       skyActive = true;
+      lastWalkAt = performance.now(); // 은하에 있던 시간이 첫 프레임에 몰리지 않게
       skyStarPos = entry.cur.clone();
       fly = null;
       // 은하 씬 통째로 숨김 (복귀 시 visible 복원)
@@ -1921,6 +1965,26 @@ export default function GalaxyCanvas({
             if (spin) spin.rotation.y = t * 0.24;
           }
         }
+        // 걷기 — 카메라가 아니라 행성이 발밑에서 돈다 (SSOT: src/galaxy/planet-walk.ts).
+        // dt를 0.05로 자른다: 탭을 한참 떠났다 돌아오면 한 프레임에 몇 초어치가
+        // 몰려 행성이 순간이동한다
+        if (planetPivot) {
+          const dt = Math.min((now - lastWalkAt) / 1000, 0.05);
+          lastWalkAt = now;
+          const dir = camera.getWorldDirection(walkDir);
+          const step = walkStep(
+            { x: dir.x, y: dir.y, z: dir.z },
+            { x: 0, y: 1, z: 0 },
+            walkKeys,
+            dt,
+            WALK_SPEED,
+            GROUND_RADIUS,
+          );
+          if (step.angle > 0) {
+            walkAxis.set(step.axis.x, step.axis.y, step.axis.z);
+            planetPivot.rotateOnWorldAxis(walkAxis, step.angle);
+          }
+        }
         if (meteor && skyStarPos) {
           const m = meteor;
           const mat = m.obj.material as THREE.PointsMaterial;
@@ -1986,6 +2050,9 @@ export default function GalaxyCanvas({
       disposed = true;
       cancelAnimationFrame(frameId);
       window.removeEventListener("resize", resize);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
       labelLayer.removeEventListener("wheel", onLabelWheel);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
