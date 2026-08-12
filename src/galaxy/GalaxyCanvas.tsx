@@ -24,6 +24,7 @@ import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
 import { buildDecor } from "./planet-decor-objects";
 import { PLANET_DECOR } from "@/config/planet-decor";
 import { GROUND_RADIUS, WALK_SPEED, surfaceNormal, walkStep } from "./planet-walk";
+import WalkStick from "./WalkStick";
 
 const GALAXY_BG = "#05060f";
 /** 카메라 초기/리셋 거리 (전체 보기) */
@@ -2493,6 +2494,19 @@ export default function GalaxyCanvas({
         height={140}
         className={`pointer-events-none absolute bottom-4 left-4 hidden rounded-full border border-white/10 bg-black/40 backdrop-blur ${skyInfo ? "" : "sm:block"}`}
       />
+
+      {/* 밤하늘에서만, 좁은 화면에서만 — PC는 방향키로 걷는다.
+          좌하단은 밤하늘에서 미니맵이 숨겨져 비어 있는 자리다 */}
+      {skyInfo && (
+        <WalkStick
+          onChange={(v) => {
+            walkKeysRef.current.forward = v.forward;
+            walkKeysRef.current.back = v.back;
+            walkKeysRef.current.left = v.left;
+            walkKeysRef.current.right = v.right;
+          }}
+        />
+      )}
 
       {status === "error" && (
         <div className="absolute inset-0 grid place-items-center text-red-300">
