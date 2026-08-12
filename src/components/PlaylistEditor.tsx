@@ -1,7 +1,13 @@
 "use client";
 
 /**
- * 목록 상세의 곡 목록 — 드래그로 재생 순서 바꾸기 + 곡 빼기.
+ * 목록 상세 — 제목·재생 버튼·곡 목록을 한 컴포넌트가 같은 state로 갖는다.
+ *
+ * 처음엔 재생 버튼(`PlaylistPlayButton`)이 이 컴포넌트의 형제로, 서버가 내려준
+ * `pl.songs`를 그대로 들고 있었다. 그러면 여기서 순서를 바꾸거나 곡을 빼도 그
+ * 형제는 낡은 목록을 그대로 쥔 채라 "재생" 버튼이 옛 순서로 큐를 만들거나 이미
+ * 뺀 곡을 태웠다. 재생 버튼을 이 안으로 들여 같은 `songs` state를 읽게 해서
+ * 화면과 재생이 항상 같은 데이터를 보게 한다.
  *
  * 드래그 라이브러리를 쓰지 않는다: 이 저장소는 npm install이 멈춰 새 패키지를 들일 수
  * 없고(2026-08-11 실측), HTML5 draggable은 터치에서 아예 동작하지 않는다. 포인터
@@ -9,11 +15,23 @@
  *
  * 순서 계산은 하지 않는다 — `src/lib/reorder.ts`가 원본이다 (docs/SSOT.md).
  */
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import PlaylistPlayButton from "@/components/PlaylistPlayButton";
 import { dropIndex, moveItem } from "@/lib/reorder";
 import { usePlayer } from "@/player/player-context";
 import type { PlaylistTrack } from "@/server/playlists";
+
+/**
+ * 서버 에러 메시지를 화면에 찍기 전 실제로 문자열인지 런타임에 확인한다.
+ * `src/app/lists/PlaylistManager.tsx`의 같은 이름 헬퍼와 같은 이유 — 지금은 모든
+ * 라우트가 문자열 리터럴만 주지만, 캐스팅만으로는 그걸 강제하지 못한다.
+ */
+function serverError(j: unknown, fallback: string): string {
+  const msg = j && typeof j === "object" ? (j as Record<string, unknown>).error : undefined;
+  return typeof msg === "string" ? msg : fallback;
+}
 
 /** 드래그 중인 행의 상태 — 어디서 잡았고 지금 어디까지 왔나 */
 interface Drag {
@@ -35,9 +53,11 @@ interface Drag {
 
 export default function PlaylistEditor({
   playlistId,
+  name,
   songs: initial,
 }: {
   playlistId: number;
+  name: string;
   songs: PlaylistTrack[];
 }) {
   const router = useRouter();
@@ -54,12 +74,15 @@ export default function PlaylistEditor({
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     setError(null);
-    // 행 높이는 여기서 딱 한 번 잰다 — 잡은 손잡이가 이미 목록 안에 있으니 이 시점엔
-    // listRef가 마운트돼 있다. 글꼴·화면 폭에 따라 달라지는 값이라 그때그때 다시
-    // 재고 싶지만, 그 "그때그때"를 렌더 안에서 하면 ref를 렌더 중에 읽는 게 되어
-    // react-hooks/refs에 걸린다. 드래그 중엔 행 높이가 바뀌지 않으니 시작할 때
-    // 굳혀 둬도 무방하다.
-    const rowHeight = (listRef.current?.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0;
+    // 행 높이가 아니라 첫 두 행의 top 좌표 차이(행 간격/피치)를 잰다. divide-y는 첫 행을
+    // 뺀 나머지 모든 행에 1px border-top을 붙이므로, 첫 행 자신의 offsetHeight로 재면
+    // 실제 피치보다 1px 짧다. Math.round(dropIndex)가 그 오차를 한동안 삼키다가 행이
+    // 30개쯤 쌓이면(오차가 반 행을 넘으면) 드래그가 한 칸씩 어긋난다. 손잡이는
+    // songs.length > 1일 때만 그려지므로 이 시점엔 행이 최소 두 개 있다.
+    const first = listRef.current?.children[0] as HTMLElement | undefined;
+    const second = listRef.current?.children[1] as HTMLElement | undefined;
+    const rowHeight =
+      first && second ? second.getBoundingClientRect().top - first.getBoundingClientRect().top : 0;
     setDrag({ from: index, startY: e.clientY, deltaY: 0, to: index, rowHeight });
   };
 
@@ -98,7 +121,12 @@ export default function PlaylistEditor({
         router.refresh();
         return;
       }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        const j = await r.json().catch(() => null);
+        setSongs(before);
+        setError(serverError(j, "순서를 저장하지 못했어요"));
+        return;
+      }
       // 지금 이 목록을 듣고 있으면 큐 순서도 맞춘다 (재생은 끊기지 않는다)
       reorderQueue(playlistId, next.map((s) => s.id));
     } catch {
@@ -121,8 +149,17 @@ export default function PlaylistEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ songId }),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        const j = await r.json().catch(() => null);
+        setSongs(before);
+        setError(serverError(j, "곡을 빼지 못했어요"));
+        return;
+      }
       removeFromQueue(playlistId, songId);
+      // 서버는 이미 바뀌었다 — 화면(과 위의 재생 버튼이 쓰는 이 songs state)도
+      // 서버 렌더와 다시 맞춘다. key={songIds.join(",")}가 걸려 있어 이 refresh가
+      // 내려주는 새 songs로 컴포넌트가 다시 마운트된다
+      router.refresh();
     } catch {
       setSongs(before);
       setError("곡을 빼지 못했어요");
@@ -146,7 +183,15 @@ export default function PlaylistEditor({
 
   return (
     <>
-      {error && <p className="mb-2 text-center text-xs text-rose-300">{error}</p>}
+      <div className="mt-6 mb-5 flex items-center justify-between gap-4">
+        <h1 className="min-w-0 truncate text-2xl font-semibold">{name}</h1>
+        <PlaylistPlayButton id={playlistId} name={name} songs={songs} />
+      </div>
+      {error && (
+        <p role="alert" className="mb-2 text-center text-xs text-rose-300">
+          {error}
+        </p>
+      )}
       <ul ref={listRef} className="divide-y divide-white/10 rounded-2xl border border-white/10 bg-white/5">
         {songs.map((s, i) => (
           <li
@@ -178,10 +223,10 @@ export default function PlaylistEditor({
               </button>
             )}
             <span className="w-6 shrink-0 text-xs text-white/30">{i + 1}</span>
-            <a href={`/songs/${s.id}`} className="min-w-0 flex-1">
+            <Link href={`/songs/${s.id}`} className="min-w-0 flex-1">
               <span className="block truncate text-sm">{s.title}</span>
               <span className="block truncate text-xs text-white/45">{s.artist}</span>
-            </a>
+            </Link>
             {!s.youtubeVideoId && (
               <span
                 className="shrink-0 text-xs text-white/30"

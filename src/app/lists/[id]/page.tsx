@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { getSessionUser } from "@/auth";
 import DataCredits from "@/components/DataCredits";
 import PlaylistEditor from "@/components/PlaylistEditor";
-import PlaylistPlayButton from "@/components/PlaylistPlayButton";
 import { getPlaylistById, retryMissingVideos } from "@/server/playlists";
 
 export const dynamic = "force-dynamic";
@@ -38,11 +37,14 @@ export default async function PlaylistDetailPage(props: {
         <Link href="/lists" className="text-sm text-white/50 transition hover:text-white">
           ← 내 목록
         </Link>
-        <div className="mt-6 mb-5 flex items-center justify-between gap-4">
-          <h1 className="min-w-0 truncate text-2xl font-semibold">{pl.name}</h1>
-          <PlaylistPlayButton id={pl.id} name={pl.name} songs={pl.songs} />
-        </div>
-        <PlaylistEditor playlistId={pl.id} songs={pl.songs} />
+        <PlaylistEditor
+          // 409 뒤 router.refresh()가 새 목록을 내려도 useState(initial)은 첫 값을
+          // 붙잡고 있어, key로 다시 마운트시켜야 복구가 실제로 일어난다
+          key={pl.songs.map((s) => s.id).join(",")}
+          playlistId={pl.id}
+          name={pl.name}
+          songs={pl.songs}
+        />
         <DataCredits />
       </div>
     </main>

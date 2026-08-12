@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, sql, TransactionRollbackError, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { YOUTUBE_LOOKUP_RETRY_MAX } from "@/config/constants";
 import { generateShareSlug } from "@/lib/share-slug";
@@ -317,32 +317,42 @@ export async function reorderPlaylistSongs(
 ): Promise<ReorderResult> {
   if (!(await ownsPlaylist(userId, playlistId))) return "forbidden";
 
-  const current = await db
-    .select({ songId: schema.playlistSongs.songId })
-    .from(schema.playlistSongs)
-    .where(eq(schema.playlistSongs.playlistId, playlistId));
-  if (!sameMembers(current.map((c) => c.songId), songIds)) return "mismatch";
+  try {
+    // 확인(SELECT)과 재기록(UPDATE)을 한 트랜잭션 안에서 한다 — 따로 두면 확인 직후
+    // 다른 탭이 곡을 담거나 빼는 순간이 그 틈으로 끼어들 수 있고, 중간에 끊기면
+    // 순서가 섞인 채 남는다. (playlist_id, song_id)가 기본키라 곡마다 한 행씩
+    // 확실히 짚힌다
+    await db.transaction(async (tx) => {
+      const current = await tx
+        .select({ songId: schema.playlistSongs.songId })
+        .from(schema.playlistSongs)
+        .where(eq(schema.playlistSongs.playlistId, playlistId));
+      if (!sameMembers(current.map((c) => c.songId), songIds)) {
+        // 쓸 게 없다 — 롤백하고 아래 catch에서 mismatch로 바꿔 돌려준다
+        tx.rollback();
+      }
 
-  // 한 트랜잭션 안에서 다시 쓴다 — 중간에 끊기면 순서가 섞인 채 남는다.
-  // (playlist_id, song_id)가 기본키라 곡마다 한 행씩 확실히 짚힌다
-  await db.transaction(async (tx) => {
-    for (const [i, songId] of songIds.entries()) {
+      for (const [i, songId] of songIds.entries()) {
+        await tx
+          .update(schema.playlistSongs)
+          .set({ position: i })
+          .where(
+            and(
+              eq(schema.playlistSongs.playlistId, playlistId),
+              eq(schema.playlistSongs.songId, songId),
+            ),
+          );
+      }
       await tx
-        .update(schema.playlistSongs)
-        .set({ position: i })
-        .where(
-          and(
-            eq(schema.playlistSongs.playlistId, playlistId),
-            eq(schema.playlistSongs.songId, songId),
-          ),
-        );
-    }
-    await tx
-      .update(schema.playlists)
-      .set({ updatedAt: new Date() })
-      .where(eq(schema.playlists.id, playlistId));
-  });
-  return "ok";
+        .update(schema.playlists)
+        .set({ updatedAt: new Date() })
+        .where(eq(schema.playlists.id, playlistId));
+    });
+    return "ok";
+  } catch (e) {
+    if (e instanceof TransactionRollbackError) return "mismatch";
+    throw e;
+  }
 }
 
 /** 목록 + 담긴 곡 (position 순). 열람 권한 판단은 호출부가 한다 */

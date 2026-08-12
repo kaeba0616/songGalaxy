@@ -646,8 +646,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (!q || q.playlistId !== playlistId) return;
       const byId = new Map(q.songs.map((s) => [s.id, s]));
       const songs = songIds.map((id) => byId.get(id)).filter((s): s is PlayerSong => s != null);
-      // 큐에 없는 곡이 섞여 있으면(다른 탭에서 담긴 곡) 재배열을 포기한다 —
-      // 반쪽짜리 큐를 만들면 듣던 곡이 사라질 수 있다
+      // songIds에는 있지만 큐엔 없는 곡(다른 탭에서 방금 담긴 곡)은 여기서 자연히
+      // 걸러지고, 남은 곡들의 상대 순서만 반영된다 — 그게 맞는 결과라 막지 않는다.
+      // 이 검사가 실제로 막는 건 반대 경우다: 큐엔 있는데 songIds가 빠뜨린 곡이
+      // 남아 있으면(다른 탭에서 곡이 빠짐) 재배열을 포기한다 — 그 곡을 큐에서도
+      // 지워야 하는데 여긴 순서만 다루므로, 그냥 진행하면 반쪽짜리 큐가 된다
       if (songs.length !== q.songs.length) return;
       const next = { ...q, songs };
       queueRef.current = next;
@@ -662,9 +665,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
    * 빼는 곡이 재생 중이면 ⏭를 누른 것과 같게 다음 곡으로 넘긴다 — 그러지 않으면
    * 큐에 없는 곡이 끝났을 때 `advanceRef`가 `idx < 0`으로 재생을 끝내버린다.
    *
-   * `playStep(1)`을 그냥 부르면 안 된다: 이미 큐에서 빠진 곡을 찾지 못해(idx < 0)
-   * 목록의 **첫 곡**부터 다시 트는데, 우리가 원하는 것은 뺀 자리의 다음 곡이다.
-   * 그래서 넘길 곡을 빼기 전에 직접 정한다.
+   * `playInQueue`(→ mode가 playlist면 `playPlaylist`)는 쓰지 않는다: `playPlaylist`는
+   * "새 목록을 트는 것"을 전제로 `ytErrorsRef`·`ytSongErrorsRef`·`notice`를 지우고
+   * `mode`를 playlist로 되돌린다 — 곡 하나를 뺐을 뿐인데 그 목록의 영상 오류 이력이
+   * 통째로 사라진다(docs/SSOT.md: 두 값 중 어느 쪽도 지우지 말 것). 게다가 `mode`가
+   * 오류 폭주로 이미 browse로 내려간 큐라면 `playInQueue`는 `playFrom` 분기를 타는데,
+   * `playFrom`은 지정한 그 자리 곡 하나만 시도하다 미리듣기가 없으면 `no-preview`를
+   * 그대로 던질 뿐 다음 곡으로 넘어가지 않아 `playingId`가 이미 뺀 곡을 가리킨 채
+   * 남는다. 그래서 `advanceRef`/`playStep`과 같은 모양으로, 큐 자신의 mode를 지킨 채
+   * `findPlayable`로 직접 다음 곡을 찾는다.
+   *
+   * `playStep(1)`을 그냥 부르면 안 되는 이유는 그대로다: 이미 큐에서 빠진 곡을
+   * 찾지 못해(idx < 0) 목록의 **첫 곡**부터 다시 트는데, 우리가 원하는 것은 뺀
+   * 자리의 다음 곡이다. 그래서 시작 인덱스를 빼기 전에 직접 정한다.
    */
   const removeFromQueue = useCallback(
     (playlistId: number, songId: number): void => {
@@ -685,13 +698,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
       // 큐에서 이미 빠진 곡으로 다시 들어오면(연타·경쟁) at이 -1이고,
       // JS의 %는 부호를 유지해 songs[-1] → undefined가 된다. 자리를 모를 때는
-      // 목록의 첫 곡으로 이어간다
-      const nextSong = at < 0 ? songs[0] : songs[at % songs.length];
-      // playInQueue는 이 큐의 mode를 지킨다 — 목록 재생이면 영상으로 이어진다.
-      // 재생할 수 없는 곡이면 findPlayable이 그 다음으로 알아서 넘어간다
-      void playInQueue(next, nextSong.id).catch(() => undefined);
+      // 목록의 첫 곡부터 findPlayable을 돌린다
+      const start = at < 0 ? 0 : at % songs.length;
+      void findPlayable(next, start, 1).then((hit) => {
+        if (!hit) {
+          if (queueRef.current === next) setPlayingId(null); // 재생 가능한 곡이 하나도 없음
+          return;
+        }
+        playSong(hit.song, hit.previewUrl, next.mode ?? "browse").catch(() =>
+          clearIfStill(hit.song.id),
+        );
+      });
     },
-    [playInQueue, setPlayingId],
+    [clearIfStill, findPlayable, playSong, setPlayingId],
   );
 
   /**
