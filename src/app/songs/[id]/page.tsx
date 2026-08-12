@@ -77,9 +77,11 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 flex items-center justify-between">
           <BackToGalaxyLink className="text-sm text-white/50 transition hover:text-white" />
+          {/* ml-auto: 겹쳐 띄운 화면에서는 왼쪽의 "은하로 돌아가기"가 사라지는데,
+              justify-between은 자식이 하나면 왼쪽에 붙이므로 이 버튼이 반대편으로 튄다 */}
           <Link
             href={`/?song=${song.id}`}
-            className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm backdrop-blur transition hover:bg-white/20"
+            className="ml-auto rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm backdrop-blur transition hover:bg-white/20"
           >
             ✦ 은하에서 보기
           </Link>
