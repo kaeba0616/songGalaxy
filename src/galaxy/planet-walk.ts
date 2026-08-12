@@ -31,15 +31,19 @@ export const WALK_SPEED = 40;
  * planet-decor.ts(서버도 읽으므로 여기서 import — three는 안 들어온다)가 여기서 가져다 쓴다.
  */
 export const GROUND_RADIUS = 300;
-/** 서 있는 지점이 지면 표면보다 이만큼 위에 있다는 뜻(눈높이) */
-const EYE_HEIGHT = 1.5;
+/**
+ * 서 있는 지점이 지면 표면보다 이만큼 위에 떠 있다. 눈높이가 아니다 —
+ * 카메라는 여기서 3.5 더 위(GalaxyCanvas의 `eye`)라, 눈높이로 읽고 고치면
+ * 지면이 발밑에서 어긋난다.
+ */
+const STAND_CLEARANCE = 1.5;
 /**
  * 지면 구의 중심이 서 있는 지점(피벗 원점)보다 얼마나 아래에 있는지.
  * GROUND_RADIUS에서 파생시킨다 — 반경을 바꿔도 두 값이 따로 놀지 않는다
  * (예전엔 298.5를 따로 손으로 적어야 해서, 반경만 바꾸고 이 값을 깜빡하면
  * 지면이 눈높이에서 어긋나 발이 땅에 파묻히거나 붕 뜬 채로 보였다).
  */
-export const GROUND_CENTER_OFFSET = GROUND_RADIUS - EYE_HEIGHT;
+export const GROUND_CENTER_OFFSET = GROUND_RADIUS - STAND_CLEARANCE;
 
 const dot = (a: Vec3, b: Vec3): number => a.x * b.x + a.y * b.y + a.z * b.z;
 const cross = (a: Vec3, b: Vec3): Vec3 => ({
