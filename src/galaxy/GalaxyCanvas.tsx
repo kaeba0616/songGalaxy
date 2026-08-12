@@ -1892,7 +1892,9 @@ export default function GalaxyCanvas({
         if (skyGroup) {
           for (const o of skyGroup.children) {
             const spin = o.getObjectByName("decor-spin");
-            if (spin) spin.rotation.y += 0.004;
+            // t는 경과 초(now/1000) — 프레임마다 더하면 주사율이 높을수록 빨리 돈다.
+            // 이웃 셰이더들(uTime)처럼 절대 시간으로 각도를 정해 주사율과 무관하게 만든다
+            if (spin) spin.rotation.y = t * 0.24;
           }
         }
         if (meteor && skyStarPos) {

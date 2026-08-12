@@ -42,13 +42,19 @@ describe("decorPlacement", () => {
     assert.notDeepEqual(decorPlacement(7, "trees"), decorPlacement(7, "rocks"));
   });
 
-  it("거리는 25~75 안이다", () => {
-    // 이 행성은 반경 300 구여서 눈높이에서 지평선이 약 30밖에 안 된다.
-    // 그보다 멀리 두면 행성이 스스로 가려 아무것도 안 보인다.
+  it("거리는 항목별 밴드 안이다 — flat 항목은 더 가깝다", () => {
+    // 이 행성은 반경 300 구여서 눈높이에서 지평선이 약 30밖에 안 된다. 높이가 있는
+    // 지면 오브젝트는 25~75까지 둬도 꼭대기가 지평선을 넘어오지만, 호수처럼 높이(=flat)가
+    // 없는 오브젝트는 그림자도 높이도 없어 지평선 위로 올라오지 못하므로 더 가까운
+    // 10~30 밴드를 쓴다 — 안 그러면 원반의 먼쪽 절반이 지평선 너머로 가라앉는다.
     for (let userId = 1; userId <= 50; userId++) {
       for (const d of PLANET_DECOR) {
         const p = decorPlacement(userId, d.slug);
-        assert.ok(p.distance >= 25 && p.distance <= 75, `${userId}/${d.slug} → ${p.distance}`);
+        const [lo, hi] = d.flat ? [10, 30] : [25, 75];
+        assert.ok(
+          p.distance >= lo && p.distance <= hi,
+          `${userId}/${d.slug} → ${p.distance} (기대 [${lo}, ${hi}])`,
+        );
       }
     }
   });

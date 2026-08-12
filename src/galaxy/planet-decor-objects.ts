@@ -7,8 +7,9 @@
  * 여기는 "그 slug가 어떻게 생겼나"만 안다.
  */
 import * as THREE from "three";
-import { decorPlacement, groundHeightOffset } from "@/config/planet-decor";
+import { PLANET_DECOR, decorPlacement, groundHeightOffset } from "@/config/planet-decor";
 import type { PlanetTheme } from "@/config/planet-themes";
+import { hashString, mulberry32 } from "@/lib/layout-math";
 
 /** 하늘 돔 위 오브젝트가 놓이는 반경 — 곡 별과 같다 */
 const SKY_RADIUS = 430;
@@ -105,10 +106,11 @@ function lighthouse(theme: PlanetTheme): THREE.Object3D {
 function lake(theme: PlanetTheme, rng: () => number, distance: number): THREE.Object3D {
   // obelisk와 같은 이유로 Group으로 감싼다 (buildDecor가 position을 덮어쓴다)
   const g = new THREE.Group();
-  // 절대 크기로 두면 배치 거리(25~75)보다 커질 수 있어 카메라가 호수 안에 서게 된다 —
-  // 그래서 반경을 거리의 비율로 정한다. buildDecor가 여기에 place.scale(최대 1.25)을
-  // 한 번 더 곱하므로, 비율 상한(0.45)은 그 곱까지 감안해도 거리를 넘지 않게 잡았다
-  // (0.45 * 1.25 = 0.5625, 즉 최악의 경우도 거리의 56%까지만 차오른다)
+  // 절대 크기로 두면 배치 거리(flat 항목 밴드 10~30, decorPlacement 참고)보다 커질 수
+  // 있어 카메라가 호수 안에 서게 된다 — 그래서 반경을 거리의 비율로 정한다. buildDecor가
+  // 여기에 place.scale(최대 1.25)을 한 번 더 곱하므로, 비율 상한(0.45)은 그 곱까지
+  // 감안해도 거리를 넘지 않게 잡았다 (0.45 * 1.25 = 0.5625, 즉 최악의 경우도 거리의
+  // 56%까지만 차오른다)
   const r = distance * (0.3 + rng() * 0.15);
   // 반투명이라 뒤의(거의 검정인) 지면과 섞인 결과로 보인다 — 예전 배율(x0.5, 불투명도 .55)은
   // 섞고 나면 지면과 몇 단만 차이 나 안 보였다. glow를 거의 그대로 쓰고 불투명도도 올려서
@@ -161,22 +163,25 @@ export function buildDecor(
   theme: PlanetTheme,
 ): THREE.Object3D | null {
   const place = decorPlacement(userId, slug);
-  // 도형 안에서 쓰는 흔들림도 같은 자리 값에서 파생시켜 재현성을 지킨다
-  let t = place.angle * 1000 + place.distance;
-  const rng = () => {
-    t = (t * 9301 + 49297) % 233280;
-    return t / 233280;
-  };
+  // 도형 안에서 쓰는 흔들림은 자리 계산과 다른 시드를 써야 한다 — SSOT 시드 유틸
+  // (mulberry32/hashString, src/lib/layout-math.ts)을 그대로 쓴다. 재현성은
+  // 결정적 시드로 지켜지고, 자리와 시드가 갈라져 있어도 userId+slug가 같으면 늘 같다
+  const rng = mulberry32(hashString(`decorshape:${userId}:${slug}`));
+
+  // 어디에 놓이는지(하늘/지면)는 카탈로그가 정한다 — 여기서 다시 판단하면 두 번째
+  // 진실의 원본이 생긴다. 다음에 sky 항목을 추가하고 이 switch에 표시를 깜빡해도
+  // 지면에 놓일 뿐 에러가 안 나므로(그리고 짧은 오브젝트는 지평선 아래라 안 보인다),
+  // 이 판단만큼은 카탈로그 read-through로 고정한다
+  const sky = PLANET_DECOR.find((d) => d.slug === slug)?.place === "sky";
 
   let obj: THREE.Object3D | null = null;
-  let sky = false;
   switch (slug) {
     case "trees": obj = trees(theme, rng); break;
     case "rocks": obj = rocks(theme, rng); break;
     case "obelisk": obj = obelisk(theme); break;
     case "lighthouse": obj = lighthouse(theme); break;
     case "lake": obj = lake(theme, rng, place.distance); break;
-    case "moon": obj = moon(theme); sky = true; break;
+    case "moon": obj = moon(theme); break;
     default: return null;
   }
 
