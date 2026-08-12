@@ -227,7 +227,7 @@ body {
    window.resize만 듣기 때문에 폭을 밀면 다음 창 크기 변경 전까지 늘어난 채 남는다.
 
    주의: 이 규칙은 레이어 밖이라 특이도와 무관하게 어떤 Tailwind margin 유틸리티도 이긴다.
-   지금은 8개 <main> 전부 px-5 py-8만 쓰고 margin 유틸리티가 없어 무해하지만, 나중에
+   지금은 8개 <main> 어디에도 margin 유틸리티가 없어 무해하지만, 나중에
    누가 <main className="mx-auto …">를 쓰면 그 margin-right: auto가 조용히 이 규칙으로
    덮여 페이지가 가운데 정렬 대신 왼쪽으로 붙는다. */
 main {
