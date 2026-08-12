@@ -683,7 +683,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setPlayingId(null);
         return;
       }
-      const nextSong = songs[at % songs.length];
+      // 큐에서 이미 빠진 곡으로 다시 들어오면(연타·경쟁) at이 -1이고,
+      // JS의 %는 부호를 유지해 songs[-1] → undefined가 된다. 자리를 모를 때는
+      // 목록의 첫 곡으로 이어간다
+      const nextSong = at < 0 ? songs[0] : songs[at % songs.length];
       // playInQueue는 이 큐의 mode를 지킨다 — 목록 재생이면 영상으로 이어진다.
       // 재생할 수 없는 곡이면 findPlayable이 그 다음으로 알아서 넘어간다
       void playInQueue(next, nextSong.id).catch(() => undefined);
