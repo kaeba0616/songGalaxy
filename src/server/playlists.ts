@@ -3,6 +3,7 @@ import { db, schema } from "@/db";
 import { YOUTUBE_LOOKUP_RETRY_MAX } from "@/config/constants";
 import { generateShareSlug } from "@/lib/share-slug";
 import { nextPosition } from "@/player/engine";
+import { sameMembers } from "@/lib/reorder";
 import { getYoutubeVideoId } from "@/server/youtube";
 
 /** 목록 한 줄 요약 — 곡 개수는 저장하지 않고 매번 센다 (SSOT) */
@@ -296,6 +297,52 @@ export async function removeSongFromPlaylist(
     .set({ updatedAt: new Date() })
     .where(eq(schema.playlists.id, playlistId));
   return true;
+}
+
+export type ReorderResult = "ok" | "forbidden" | "mismatch";
+
+/**
+ * 목록의 재생 순서를 통째로 다시 쓴다.
+ *
+ * 부분 이동(`{songId, toIndex}`)이 아니라 **전체 순서 배열**을 받는 이유:
+ * 멱등적이고, 다른 탭에서 곡이 추가·삭제돼 클라이언트가 낡았을 때 조용히
+ * 어긋나는 대신 집합 비교로 잡아 "mismatch"를 돌려줄 수 있다.
+ *
+ * position을 0..n-1로 다시 써도 `nextPosition`(최대값+1)의 전제는 유지된다.
+ */
+export async function reorderPlaylistSongs(
+  userId: number,
+  playlistId: number,
+  songIds: number[],
+): Promise<ReorderResult> {
+  if (!(await ownsPlaylist(userId, playlistId))) return "forbidden";
+
+  const current = await db
+    .select({ songId: schema.playlistSongs.songId })
+    .from(schema.playlistSongs)
+    .where(eq(schema.playlistSongs.playlistId, playlistId));
+  if (!sameMembers(current.map((c) => c.songId), songIds)) return "mismatch";
+
+  // 한 트랜잭션 안에서 다시 쓴다 — 중간에 끊기면 순서가 섞인 채 남는다.
+  // (playlist_id, song_id)가 기본키라 곡마다 한 행씩 확실히 짚힌다
+  await db.transaction(async (tx) => {
+    for (const [i, songId] of songIds.entries()) {
+      await tx
+        .update(schema.playlistSongs)
+        .set({ position: i })
+        .where(
+          and(
+            eq(schema.playlistSongs.playlistId, playlistId),
+            eq(schema.playlistSongs.songId, songId),
+          ),
+        );
+    }
+    await tx
+      .update(schema.playlists)
+      .set({ updatedAt: new Date() })
+      .where(eq(schema.playlists.id, playlistId));
+  });
+  return "ok";
 }
 
 /** 목록 + 담긴 곡 (position 순). 열람 권한 판단은 호출부가 한다 */
