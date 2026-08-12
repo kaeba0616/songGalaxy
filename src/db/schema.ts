@@ -184,6 +184,22 @@ export const playlistSongs = pgTable(
 );
 
 /**
+ * 행성에 놓은 꾸미기 오브젝트. 좌표는 저장하지 않는다 —
+ * 자리는 언제나 userId+slug 해시에서 다시 나온다 (src/config/planet-decor.ts).
+ */
+export const planetDecor = pgTable(
+  "planet_decor",
+  {
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    addedAt: timestamp("added_at").notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.slug] })],
+);
+
+/**
  * 사용자별 YouTube 검색 소비량 — "실제로 태운 쿼터"의 원본 (docs/SSOT.md).
  *
  * 이 값만은 계산으로 되살릴 수 없어 저장한다(SSOT의 "저장하지 않는다" 원칙의 예외).
@@ -211,3 +227,4 @@ export type UserStar = typeof userStars.$inferSelect;
 export type Playlist = typeof playlists.$inferSelect;
 export type PlaylistSong = typeof playlistSongs.$inferSelect;
 export type YoutubeLookup = typeof youtubeLookups.$inferSelect;
+export type PlanetDecor = typeof planetDecor.$inferSelect;

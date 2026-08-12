@@ -3,6 +3,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db, schema } from "@/db";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
+import { listPlanetDecor } from "@/server/planet-decor";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export async function GET(
   }
   const sub = alias(schema.themes, "sub");
   const big = alias(schema.themes, "big");
-  const [rows, clusterRows, [owner]] = await Promise.all([
+  const [rows, clusterRows, [owner], decor] = await Promise.all([
     db
       .select({ songId: schema.likes.songId, at: schema.likes.createdAt })
       .from(schema.likes)
@@ -43,6 +44,7 @@ export async function GET(
       .select({ bio: schema.users.bio, pinnedSongId: schema.users.pinnedSongId })
       .from(schema.users)
       .where(eq(schema.users.id, userId)),
+    listPlanetDecor(userId),
   ]);
   return NextResponse.json(
     {
@@ -51,6 +53,8 @@ export async function GET(
       lastLikedAt: rows[0]?.at ?? null,
       bio: owner?.bio ?? null,
       pinnedSongId: owner?.pinnedSongId ?? null,
+      // 방문자에게도 주인이 꾸민 대로 보인다 (테마와 같은 방침)
+      decor,
       clusters: clusterRows.map((c) => ({
         slug: c.cluster,
         label: CLUSTER_META.get(c.cluster)?.label ?? c.cluster,
