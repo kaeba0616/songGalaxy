@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSessionUser } from "@/auth";
 import DataCredits from "@/components/DataCredits";
+import PlaylistEditor from "@/components/PlaylistEditor";
 import PlaylistPlayButton from "@/components/PlaylistPlayButton";
 import { getPlaylistById, retryMissingVideos } from "@/server/playlists";
 
@@ -41,30 +42,7 @@ export default async function PlaylistDetailPage(props: {
           <h1 className="min-w-0 truncate text-2xl font-semibold">{pl.name}</h1>
           <PlaylistPlayButton id={pl.id} name={pl.name} songs={pl.songs} />
         </div>
-        <ul className="divide-y divide-white/10 rounded-2xl border border-white/10 bg-white/5">
-          {pl.songs.map((s, i) => (
-            <li key={s.id} className="flex items-center gap-3 px-4 py-3">
-              <span className="w-6 shrink-0 text-xs text-white/30">{i + 1}</span>
-              <Link href={`/songs/${s.id}`} className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{s.title}</span>
-                <span className="block truncate text-xs text-white/45">{s.artist}</span>
-              </Link>
-              {!s.youtubeVideoId && (
-                <span
-                  className="shrink-0 text-xs text-white/30"
-                  title="영상을 아직 찾지 못해 30초 미리듣기로 재생됩니다"
-                >
-                  미리듣기
-                </span>
-              )}
-            </li>
-          ))}
-          {pl.songs.length === 0 && (
-            <li className="px-4 py-10 text-center text-sm text-white/40">
-              아직 담은 곡이 없어요 — 곡을 들으면서 알약의 + 를 눌러보세요
-            </li>
-          )}
-        </ul>
+        <PlaylistEditor playlistId={pl.id} songs={pl.songs} />
         <DataCredits />
       </div>
     </main>
