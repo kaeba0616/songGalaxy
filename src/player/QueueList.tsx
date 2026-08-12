@@ -14,10 +14,13 @@ import { ENRICH_BATCH } from "@/config/constants";
 import Marquee from "./Marquee";
 import { usePlayer } from "./player-context";
 
+/** 큐가 없을 때 쓰는 고정 빈 배열 — 매 렌더 새 배열을 만들면 효과가 헛돈다 */
+const NO_SONGS: never[] = [];
+
 export default function QueueList({ className = "" }: { className?: string }) {
   const { queue, playingId, isPaused, media, fetchMedia, playInQueue, toggle } = usePlayer();
   const listRef = useRef<HTMLUListElement>(null);
-  const songs = queue?.songs ?? [];
+  const songs = queue?.songs ?? NO_SONGS;
   const currentIndex = songs.findIndex((s) => s.id === playingId);
 
   // 보이는 동안 현재 곡 주변의 앨범아트를 보강한다 — 목록 재생은 영상 ID가 있으면
@@ -28,10 +31,11 @@ export default function QueueList({ className = "" }: { className?: string }) {
     void fetchMedia(songs.slice(start, start + ENRICH_BATCH).map((s) => s.id));
   }, [currentIndex, songs, fetchMedia]);
 
-  // 열리면 지금 곡이 보이도록 스크롤 (긴 목록에서 어디를 듣고 있는지 잃지 않게)
+  // 지금 곡이 바뀌면 그 줄이 보이도록 따라간다. 마운트 때 한 번만 하면
+  // 레일처럼 계속 떠 있는 목록이 재생을 따라가지 못하고 처음 자리에 멈춘다
   useLayoutEffect(() => {
     listRef.current?.querySelector('[data-current="true"]')?.scrollIntoView({ block: "center" });
-  }, []);
+  }, [playingId]);
 
   if (songs.length === 0) return null;
 
