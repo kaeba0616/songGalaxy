@@ -2057,31 +2057,18 @@ export default function GalaxyCanvas({
             </span>
           </button>
         ) : (
-          <>
-            <a
-              href="/api/auth/signin?callbackUrl=/"
-              className="rounded-full border border-white/25 bg-white/15 px-4 py-1.5 text-sm text-white backdrop-blur transition hover:bg-white/25"
-            >
-              Google 로그인
-            </a>
-            <Link
-              href="/songs"
-              className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
-            >
-              곡 목록
-            </Link>
-            {/* 로그인 전에도 메뉴로 들어갈 문이 있어야 한다 — 내 노래 목록 등은 로그인 없이도 볼 수 있다 */}
-            <button
-              type="button"
-              onClick={(e) => toggleMenu(e.currentTarget)}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-label="메뉴"
-              className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
-            >
-              ☰
-            </button>
-          </>
+          /* 로그인·곡 목록도 여기 두지 않는다 — 드롭다운에 같은 항목이 이미 있다.
+             로그인 전에도 문은 열려 있어야 하므로 이 버튼 하나는 남긴다 */
+          <button
+            type="button"
+            onClick={(e) => toggleMenu(e.currentTarget)}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label="메뉴"
+            className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-white/90 backdrop-blur transition hover:bg-white/20"
+          >
+            ☰
+          </button>
         )}
         {/* 행성의 링크 복사·은하로 나가기, 은하의 전체 보기 모두 여기 두지 않는다 —
             계정 드롭다운으로 모아 화면 가장자리에는 계정 버튼 하나만 남긴다.
