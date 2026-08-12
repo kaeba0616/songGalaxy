@@ -209,3 +209,14 @@ body {
 .added-pop {
   animation: added-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+
+/* 영상 레일/카드가 서 있는 동안 콘텐츠 본문이 그 아래로 깔리지 않게 자리를 비운다.
+   값은 VideoStage가 자기 크기를 재서 채운다 (없으면 0).
+
+   은하(/, /planet/[id])는 <main>을 쓰지 않고 GalaxyCanvas를 그대로 렌더하므로
+   이 규칙에 걸리지 않는다 — 전체 화면 캔버스 위에는 겹치는 것이 맞고, 캔버스는
+   window.resize만 듣기 때문에 폭을 밀면 다음 창 크기 변경 전까지 늘어난 채 남는다. */
+main {
+  padding-right: var(--video-rail-w, 0px);
+  padding-top: var(--video-rail-h, 0px);
+}
