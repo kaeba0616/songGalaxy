@@ -22,6 +22,8 @@ import { usePlayer } from "@/player/player-context";
 import type { PlayerQueue, PlayerSnapshot } from "@/player/player-context";
 import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
 import { buildDecor } from "./planet-decor-objects";
+import { PLANET_DECOR } from "@/config/planet-decor";
+import { surfaceNormal } from "./planet-walk";
 
 const GALAXY_BG = "#05060f";
 /** 카메라 초기/리셋 거리 (전체 보기) */
@@ -1003,6 +1005,7 @@ export default function GalaxyCanvas({
     // 전용 밤하늘 씬(그라데이션 하늘 돔 + 곡면 지평선 + 잔별 + 유성)으로 전환.
     // 좋아요 곡들은 실제 은하 좌표가 아니라 하늘 돔 위에 보기 좋게 배치한다.
     let skyGroup: THREE.Group | null = null;
+    let planetPivot: THREE.Group | null = null; // 지면+지면 꾸미기 — Task 3이 이걸 돌린다
     let skyTwinkleMat: THREE.ShaderMaterial | null = null; // 잔별 반짝임 시간 갱신용
     let skyDomePos: Map<number, THREE.Vector3> | null = null; // songIndex → 돔 좌표
     let skyHighlightPoints: THREE.Points | null = null; // 밤하늘 곡 별 (클릭 판정용)
@@ -1076,24 +1079,24 @@ export default function GalaxyCanvas({
         uniforms: {
           uGround: { value: new THREE.Color(planet.ground) },
           uStarGlow: { value: new THREE.Color("#ffd98a") },
-          uCenter: { value: C.clone() },
           uTime: { value: 0 },
         },
         vertexShader: /* glsl */ `
-          varying vec3 vWorld;
+          varying vec3 vLocal;
           void main() {
-            vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+            // 월드가 아니라 로컬 — 행성이 돌면 글로우도 함께 돌아야 한다
+            vLocal = position;
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }
         `,
         fragmentShader: /* glsl */ `
           uniform vec3 uGround;
           uniform vec3 uStarGlow;
-          uniform vec3 uCenter;
           uniform float uTime;
-          varying vec3 vWorld;
+          varying vec3 vLocal;
           void main() {
-            float d = distance(vWorld, uCenter);
+            // 착륙 지점은 구의 꼭대기 — 로컬 (0, 300, 0)
+            float d = distance(vLocal, vec3(0.0, 300.0, 0.0));
             float pulse = 0.85 + 0.15 * sin(uTime * 1.4);
             // 발밑(별의 심장)에서 배어나오는 별빛 — 멀어질수록 잦아든다
             vec3 col = uGround + uStarGlow * exp(-d / 60.0) * 0.85 * pulse;
@@ -1102,9 +1105,14 @@ export default function GalaxyCanvas({
         `,
       });
       skyGroundMat = groundMat;
+      // 행성 피벗 — 지면과 지면 꾸미기가 여기 들어가고, 걷기는 이걸 돌리는 것이다.
+      // 자식을 반드시 **로컬 좌표**로 넣어야 한다: rotateOnWorldAxis는 객체의 원점을
+      // 지나는 축으로 도는데, 그 원점이 곧 이 피벗의 위치(=구의 중심)이기 때문이다
+      planetPivot = new THREE.Group();
+      planetPivot.position.copy(C).addScaledVector(up, -298.5); // 꼭대기가 발밑 ~1.5 아래
       const ground = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 24), groundMat);
-      ground.position.copy(C).addScaledVector(up, -298.5); // 꼭대기가 발밑 ~1.5 아래
-      skyGroup.add(ground);
+      planetPivot.add(ground); // 로컬 (0,0,0) = 구의 중심
+      skyGroup.add(planetPivot);
 
       // 2-1) 지평선 언덕 실루엣 — 유저별 시드로 굴곡이 다른 원형 능선 (이슈 #10-3)
       {
@@ -1144,10 +1152,25 @@ export default function GalaxyCanvas({
       }
 
       // 2-2) 주인이 놓은 꾸미기 오브젝트 (SSOT: src/config/planet-decor.ts).
-      // skyGroup에 넣어야 행성을 나갈 때 아래 dispose 경로를 함께 탄다
+      // 지면 항목은 행성 피벗에 넣어 함께 돈다 — 걸어가면 지평선 너머로 넘어간다.
+      // 하늘 항목(달)은 skyGroup에 그대로 둔다: 하늘은 무한히 멀어 걸어도 안 움직인다
       for (const slug of decor) {
         const obj = buildDecor(slug, entry.data.userId, C, planet);
-        if (obj) skyGroup.add(obj);
+        if (!obj) continue;
+        const item = PLANET_DECOR.find((d) => d.slug === slug);
+        if (item?.place === "sky") {
+          skyGroup.add(obj);
+          continue;
+        }
+        // 월드 → 피벗 로컬. 그리고 자기 자리의 법선으로 세운다 — 안 세우면
+        // 행성이 돌 때 정수리 기준 +Y로 서 있던 것들이 옆으로 넘어져 보인다
+        obj.position.sub(planetPivot.position);
+        const n = surfaceNormal(obj.position);
+        obj.quaternion.setFromUnitVectors(
+          new THREE.Vector3(0, 1, 0),
+          new THREE.Vector3(n.x, n.y, n.z),
+        );
+        planetPivot.add(obj);
       }
 
       // 3) 장식 잔별 900개 — 각자 위상이 다른 반짝임 (배경 별 셰이더와 동일 패턴)
@@ -1431,6 +1454,7 @@ export default function GalaxyCanvas({
           }
         });
         skyGroup = null;
+        planetPivot = null; // 피벗은 skyGroup의 자식이라 위에서 이미 dispose됨 — 참조만 끊는다
       }
       scene.children.forEach((o) => (o.visible = true)); // 은하 복원
       skyLabels.forEach((l) => l.el.remove());
