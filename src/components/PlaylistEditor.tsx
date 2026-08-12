@@ -24,6 +24,13 @@ interface Drag {
   deltaY: number;
   /** 지금 놓으면 들어갈 자리 */
   to: number;
+  /**
+   * 잡는 순간(onPointerDown, 이벤트 핸들러)에 한 번만 잰 행 높이.
+   * 렌더 중에 ref를 읽으면 안 된다 — 렌더는 순수해야 하고, eslint의
+   * `react-hooks/refs`가 잡는 것도 그 이유다. 드래그하는 동안 행의 내용·높이는
+   * 바뀌지 않으므로 시작할 때 굳혀 둬도 매 렌더 다시 재는 것과 결과가 같다.
+   */
+  rowHeight: number;
 }
 
 export default function PlaylistEditor({
@@ -42,23 +49,25 @@ export default function PlaylistEditor({
   /** 요청이 겹치지 않게 — 저장 중에는 새 드래그를 받지 않는다 */
   const busyRef = useRef(false);
 
-  /** 행 높이를 그때그때 잰다 — 글꼴·화면 폭에 따라 달라진다 */
-  const rowHeight = (): number =>
-    (listRef.current?.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0;
-
   const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>, index: number) => {
     if (busyRef.current || songs.length < 2) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     setError(null);
-    setDrag({ from: index, startY: e.clientY, deltaY: 0, to: index });
+    // 행 높이는 여기서 딱 한 번 잰다 — 잡은 손잡이가 이미 목록 안에 있으니 이 시점엔
+    // listRef가 마운트돼 있다. 글꼴·화면 폭에 따라 달라지는 값이라 그때그때 다시
+    // 재고 싶지만, 그 "그때그때"를 렌더 안에서 하면 ref를 렌더 중에 읽는 게 되어
+    // react-hooks/refs에 걸린다. 드래그 중엔 행 높이가 바뀌지 않으니 시작할 때
+    // 굳혀 둬도 무방하다.
+    const rowHeight = (listRef.current?.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0;
+    setDrag({ from: index, startY: e.clientY, deltaY: 0, to: index, rowHeight });
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     setDrag((d) => {
       if (!d) return d;
       const deltaY = e.clientY - d.startY;
-      return { ...d, deltaY, to: dropIndex(d.from, deltaY, rowHeight(), songs.length) };
+      return { ...d, deltaY, to: dropIndex(d.from, deltaY, d.rowHeight, songs.length) };
     });
   };
 
@@ -128,7 +137,7 @@ export default function PlaylistEditor({
    */
   const shift = (index: number): number => {
     if (!drag) return 0;
-    const h = rowHeight();
+    const h = drag.rowHeight;
     if (index === drag.from) return drag.deltaY;
     if (drag.to > drag.from && index > drag.from && index <= drag.to) return -h;
     if (drag.to < drag.from && index >= drag.to && index < drag.from) return h;
@@ -139,9 +148,6 @@ export default function PlaylistEditor({
     <>
       {error && <p className="mb-2 text-center text-xs text-rose-300">{error}</p>}
       <ul ref={listRef} className="divide-y divide-white/10 rounded-2xl border border-white/10 bg-white/5">
-        {/* eslint-disable-next-line react-hooks/refs -- shift()가 렌더 중에 listRef를 읽어 드래그 중인
-            행의 위치를 계산한다. 측정값은 DOM에 이미 반영된 실제 행 높이이고 드래그 상태(state)가
-            바뀔 때만 다시 그려지므로 다음 렌더에서 값이 안정된다 — 여기서 값을 만들어내지 않는다 */}
         {songs.map((s, i) => (
           <li
             key={s.id}
