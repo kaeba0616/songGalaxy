@@ -12,12 +12,12 @@
  * **영상 무대는 여기 있지 않다** (`VideoStage`). 이 알약은 은하가 카드 캐러셀을 띄우면
  * 통째로 사라지는데, 무대가 자식이면 그때 같이 죽어 전곡 재생이 되살아나지 못한다.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ENRICH_BATCH } from "@/config/constants";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLikes } from "@/likes/likes-context";
 import AddToPlaylist from "./AddToPlaylist";
 import Marquee from "./Marquee";
 import { usePlayer } from "./player-context";
+import QueueList from "./QueueList";
 
 /** 드래그로 옮긴 미니플레이어 위치 (뷰포트 좌상단 기준 px) */
 const POS_KEY = "songgalaxy-miniplayer-pos";
@@ -59,7 +59,6 @@ export default function MiniPlayer() {
     changeVolume,
     toggleMute,
     fetchMedia,
-    playInQueue,
     toggle,
     playStep,
     uiHosted,
@@ -67,7 +66,6 @@ export default function MiniPlayer() {
   } = usePlayer();
   const { auth, toggleLike } = useLikes();
   const wrapRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
   /** null이면 기본 위치(하단 중앙) */
   const [pos, setPos] = useState<Pos | null>(readSavedPos);
   const [dragging, setDragging] = useState(false);
@@ -97,25 +95,12 @@ export default function MiniPlayer() {
   }, [pos, clamp]);
 
   const songs = queue?.songs ?? NO_SONGS;
-  const currentIndex = songs.findIndex((s) => s.id === playingId);
 
   // 목록 재생은 영상 ID가 있으면 /api/enrich를 건너뛴다 — 그래서 앨범아트가 비어 있다.
   // 지금 듣는 곡 것만 따로 채워 원반이 ✦ 자리표시자로 남지 않게 한다
   useEffect(() => {
     if (playingId !== null && !media[playingId]) void fetchMedia([playingId]);
   }, [playingId, media, fetchMedia]);
-
-  // 목록을 펼치면 현재 곡 주변의 앨범아트를 보강하고, 현재 곡이 보이도록 스크롤
-  useEffect(() => {
-    if (!expanded || songs.length === 0) return;
-    const start = Math.max(0, currentIndex - 2);
-    void fetchMedia(songs.slice(start, start + ENRICH_BATCH).map((s) => s.id));
-  }, [expanded, currentIndex, songs, fetchMedia]);
-
-  useLayoutEffect(() => {
-    if (!expanded) return;
-    listRef.current?.querySelector('[data-current="true"]')?.scrollIntoView({ block: "center" });
-  }, [expanded]);
 
   // 목록을 열 때 위아래 중 공간이 있는 쪽으로 펼친다 (좌우는 알약과 같은 폭이라 그대로)
   const toggleExpanded = () => {
@@ -189,66 +174,7 @@ export default function MiniPlayer() {
             openUp ? "bottom-full mb-2" : "top-full mt-2"
           }`}
         >
-          <div className="border-b border-white/10 px-4 py-2.5">
-            <p className="text-[11px] tracking-widest text-white/40">재생 목록</p>
-            <p className="truncate text-sm font-medium">{queue?.title ?? "재생 중"}</p>
-            <p className="mt-0.5 text-xs text-white/45">
-              {songs.length}곡{currentIndex >= 0 && ` · ${currentIndex + 1}번째 재생 중`}
-            </p>
-          </div>
-          {/* overscroll-contain: 끝까지 스크롤해도 뒤 페이지로 넘어가지 않게.
-              touchAction: 바깥 알약이 드래그용으로 none이라 여기서 세로 스크롤을 되살린다 */}
-          <ul
-            ref={listRef}
-            style={{ touchAction: "pan-y" }}
-            className="max-h-[45vh] overflow-y-auto overscroll-contain py-1"
-          >
-            {songs.map((s, i) => {
-              const isCurrent = s.id === playingId;
-              const art = media[s.id]?.artworkUrl;
-              return (
-                <li key={s.id}>
-                  <button
-                    type="button"
-                    data-current={isCurrent}
-                    onClick={() => {
-                      // playInQueue는 이 큐의 mode를 지킨다 — 목록 재생 중에 곡을 고르면
-                      // 30초 미리듣기로 강등되지 않고 그대로 영상으로 이어진다
-                      if (isCurrent) toggle();
-                      else if (queue) void playInQueue(queue, s.id).catch(() => undefined);
-                    }}
-                    className={`flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left transition hover:bg-white/10 ${
-                      isCurrent ? "bg-white/10" : ""
-                    }`}
-                  >
-                    <span className="w-5 shrink-0 text-center text-[11px] text-white/35">
-                      {isCurrent ? (isPaused ? "❚❚" : "♪") : i + 1}
-                    </span>
-                    {art ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지, 최적화 프록시 불필요
-                      <img
-                        src={art}
-                        alt=""
-                        draggable={false}
-                        className="h-8 w-8 shrink-0 rounded object-cover"
-                      />
-                    ) : (
-                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded bg-white/10 text-xs text-amber-100/70">
-                        ✦
-                      </span>
-                    )}
-                    <span className="min-w-0 flex-1">
-                      <Marquee
-                        text={s.title}
-                        className={`text-sm ${isCurrent ? "font-medium text-amber-100" : ""}`}
-                      />
-                      <Marquee text={s.artist} className="text-xs text-white/45" />
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <QueueList className="flex max-h-[45vh] flex-col" />
         </div>
       )}
 
