@@ -171,6 +171,14 @@ export default function GalaxyCanvas({
     setNickname,
     setAvatarUrl,
   } = useLikes();
+  /**
+   * 내가 고른 행성 테마 — /me에서 바꾸면 컨텍스트가 먼저 갱신된다.
+   * 씬은 별 데이터(/api/stars)의 테마를 쓰는데 그건 처음 한 번만 받아오므로,
+   * 내 행성에 한해 이 값이 우선한다. 이게 없으면 테마를 바꿔도 새로고침해야 보였다.
+   */
+  const myThemeRef = useRef<string | null>(null);
+  /** 내 userId — 씬(three 이펙트)은 리렌더와 무관하게 돌아서 ref로 읽는다 */
+  const myUserIdRef = useRef<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   /** 밤하늘 모드 정보 (착륙 중/완료 시 세팅) — 헤더 전환·정보 패널용 */
   const [skyInfo, setSkyInfo] = useState<PlanetInfo | null>(null);
@@ -600,6 +608,27 @@ export default function GalaxyCanvas({
     const t = setTimeout(() => flyToPosRef.current?.(s.x, s.y, s.z, 120), 1500);
     return () => clearTimeout(t);
   }, [focusMyStar, authState.star]);
+
+  /**
+   * 내 행성에 서 있는 동안 테마를 바꾸면 그 자리에서 다시 칠한다.
+   * 하늘돔·지면·언덕·달 색이 전부 enterSky에서 재질에 구워지므로, 한 군데씩
+   * 갈아끼우다 빠뜨리느니 착륙을 다시 태우는 편이 안전하다(연출은 2초).
+   * 첫 렌더에 헛돌지 않도록 직전 값과 다를 때만 움직인다.
+   */
+  const lastAppliedTheme = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    // ref 갱신도 여기서 한다 — 렌더 중에 ref를 건드리면 안 된다(react-hooks 규칙).
+    // 씬은 클릭으로 착륙할 때 읽으므로 이펙트가 돈 뒤면 늦지 않다
+    const theme = authState.planetTheme ?? null;
+    myThemeRef.current = theme;
+    myUserIdRef.current = authState.userId ?? null;
+    const prev = lastAppliedTheme.current;
+    lastAppliedTheme.current = theme;
+    if (prev === undefined || prev === theme) return;
+    if (skyInfo && authState.userId != null && skyInfo.userId === authState.userId) {
+      landByUserRef.current?.(authState.userId);
+    }
+  }, [authState.planetTheme, authState.userId, skyInfo]);
 
   // 좋아요 별 강조 동기화 — 좋아요 목록이 바뀌거나 씬이 준비되면 다시 그린다
   useEffect(() => {
@@ -1108,8 +1137,13 @@ export default function GalaxyCanvas({
       const C = skyStarPos;
       const up = new THREE.Vector3(0, 1, 0);
       skyGroup = new THREE.Group();
-      // 행성 주인의 테마 (SSOT: planet-themes.ts) — 방문자에게도 주인의 색으로
-      const planet = getPlanetTheme(entry.data.planetTheme);
+      // 행성 주인의 테마 (SSOT: planet-themes.ts) — 방문자에게도 주인의 색으로.
+      // 내 행성이면 방금 고른 값(myThemeRef)이 우선한다 — 별 데이터는 처음 받아온
+      // 그대로라 /me에서 테마를 바꿔도 새로고침 전까지 옛 색이 남는다
+      const mine = myUserIdRef.current != null && entry.data.userId === myUserIdRef.current;
+      const planet = getPlanetTheme(
+        mine ? (myThemeRef.current ?? entry.data.planetTheme) : entry.data.planetTheme,
+      );
 
       // 1) 하늘 돔 — 테마 색 그라데이션 + 지평선 글로우 밴드 (이슈 #10-3)
       const domeMat = new THREE.ShaderMaterial({
@@ -1233,10 +1267,12 @@ export default function GalaxyCanvas({
         skyGroup.add(sil);
       }
 
-      // 2-2) 주인이 놓은 꾸미기 오브젝트 (SSOT: src/config/planet-decor.ts).
+      // 2-2) 꾸미기 오브젝트 (SSOT: src/config/planet-decor.ts).
+      // **달은 켜고 끄는 것이 아니라 밤하늘의 기본값이다** — 저장 여부와 무관하게
+      // 늘 띄운다. 나머지 항목은 카탈로그에서 빠져 있어 저장돼 있어도 걸러진다.
       // 지면 항목은 행성 피벗에 넣어 함께 돈다 — 걸어가면 지평선 너머로 넘어간다.
       // 하늘 항목(달)은 skyGroup에 그대로 둔다: 하늘은 무한히 멀어 걸어도 안 움직인다
-      for (const slug of decor) {
+      for (const slug of new Set(["moon", ...decor])) {
         const obj = buildDecor(slug, entry.data.userId, C, planet);
         if (!obj) continue;
         const item = PLANET_DECOR.find((d) => d.slug === slug);

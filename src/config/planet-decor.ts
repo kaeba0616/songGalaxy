@@ -24,13 +24,11 @@ export interface PlanetDecorItem {
 
 /** 카탈로그. 항목을 빼도 저장된 slug는 지우지 않는다 — 되돌리면 다시 보이는 편이 낫다 */
 export const PLANET_DECOR: PlanetDecorItem[] = [
+  // 지금은 달 하나뿐이다. 나무·바위·오벨리스크·등대·호수는 카탈로그에서 빼서
+  // 켤 수도 보일 수도 없게 했다 — 이미 켜 둔 사람의 저장된 행은 지우지 않고
+  // 읽을 때 걸러진다(server/planet-decor.ts). 다시 넣으면 그대로 살아난다.
   { slug: "moon", label: "달", place: "sky" },
-  { slug: "trees", label: "나무", place: "ground" },
-  { slug: "rocks", label: "바위", place: "ground" },
-  { slug: "obelisk", label: "오벨리스크", place: "ground" },
-  { slug: "lighthouse", label: "등대", place: "ground" },
-  { slug: "lake", label: "호수", place: "ground", flat: true },
-];
+]
 
 /** 카탈로그에 있는 slug인지 — 서버가 저장 전에 거르는 유일한 관문이다 */
 export function isDecorSlug(slug: string): boolean {

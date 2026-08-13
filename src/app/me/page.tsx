@@ -5,13 +5,11 @@ import { db, schema } from "@/db";
 import { getSessionUser } from "@/auth";
 import { MIN_LIKES_FOR_STAR } from "@/config/constants";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
-import { DEFAULT_PLANET_THEME, PLANET_THEMES } from "@/config/planet-themes";
-import { PLANET_DECOR } from "@/config/planet-decor";
-import { listPlanetDecor } from "@/server/planet-decor";
+import { DEFAULT_PLANET_THEME } from "@/config/planet-themes";
 import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits from "@/components/DataCredits";
 import LikeButton from "@/components/LikeButton";
-import { setPlanetDecorAction, setPlanetThemeAction } from "./actions";
+import PlanetThemePicker from "./PlanetThemePicker";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +34,7 @@ export default async function MePage() {
     );
   }
 
-  const [likedSongs, [star], clusterDist, [me], decor] = await Promise.all([
+  const [likedSongs, [star], clusterDist, [me]] = await Promise.all([
     db
       .select({
         id: schema.songs.id,
@@ -71,10 +69,8 @@ export default async function MePage() {
       .select({ planetTheme: schema.users.planetTheme })
       .from(schema.users)
       .where(eq(schema.users.id, user.id)),
-    listPlanetDecor(user.id),
   ]);
   const currentTheme = me?.planetTheme ?? DEFAULT_PLANET_THEME;
-  const decorOn = new Set(decor);
 
   const total = likedSongs.length;
 
@@ -116,65 +112,13 @@ export default async function MePage() {
             <h2 className="mb-3 text-sm font-medium text-white/60">
               내 행성 테마 <span className="text-white/35">— 방문자에게도 이 색으로 보여요</span>
             </h2>
-            <div className="flex flex-wrap gap-3">
-              {PLANET_THEMES.map((theme) => (
-                <form key={theme.slug} action={setPlanetThemeAction}>
-                  <input type="hidden" name="theme" value={theme.slug} />
-                  <button
-                    type="submit"
-                    className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 transition ${
-                      currentTheme === theme.slug
-                        ? "border-amber-200/60 bg-white/10"
-                        : "border-white/10 bg-white/[0.03] hover:bg-white/10"
-                    }`}
-                  >
-                    <span
-                      className="h-8 w-8 rounded-full border border-white/20"
-                      style={{
-                        background: `linear-gradient(to bottom, ${theme.zenith} 0%, ${theme.horizon} 55%, ${theme.glow} 68%, ${theme.ground} 72%)`,
-                      }}
-                    />
-                    <span className="text-sm">{theme.label}</span>
-                  </button>
-                </form>
-              ))}
-            </div>
+            <PlanetThemePicker current={currentTheme} />
           </section>
         )}
 
-        {/* 꾸미기 — 테마와 같이 별이 있을 때만 보인다 (별이 없으면 행성 자체가 없다) */}
-        {star && (
-          <section className="mb-8">
-            <h2 className="mb-3 text-sm font-medium text-white/60">
-              행성 꾸미기 <span className="text-white/35">— 놓을 자리는 알아서 정해집니다</span>
-            </h2>
-            <div className="flex flex-wrap gap-2">
-              {PLANET_DECOR.map((d) => {
-                const on = decorOn.has(d.slug);
-                return (
-                  <form key={d.slug} action={setPlanetDecorAction}>
-                    <input type="hidden" name="slug" value={d.slug} />
-                    {/* 지금 상태의 반대를 "원하는 상태"로 보낸다 — 서버가 뒤집지 않으므로
-                        같은 요청이 두 번 가도 결과가 같다 */}
-                    <input type="hidden" name="on" value={on ? "0" : "1"} />
-                    <button
-                      type="submit"
-                      aria-pressed={on}
-                      className={`cursor-pointer rounded-full border px-3.5 py-1.5 text-sm transition ${
-                        on
-                          ? "border-amber-200/60 bg-amber-100/15 text-amber-100"
-                          : "border-white/15 bg-white/[0.03] text-white/70 hover:bg-white/10"
-                      }`}
-                    >
-                      {on ? "✦ " : ""}
-                      {d.label}
-                    </button>
-                  </form>
-                );
-              })}
-            </div>
-          </section>
-        )}
+        {/* 꾸미기 칩은 뺐다 — 달은 이제 켜고 끄는 것이 아니라 밤하늘의 기본값이고,
+            나머지 오브젝트는 카탈로그(config/planet-decor.ts)에서 빠져 있다. 저장된 행은
+            지우지 않았으므로 카탈로그에 다시 넣으면 그대로 살아난다 */}
 
         {/* 성단 분포 */}
         {clusterDist.length > 0 && (

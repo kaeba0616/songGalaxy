@@ -17,6 +17,7 @@ export async function GET(): Promise<NextResponse> {
         nickname: schema.users.nickname,
         bio: schema.users.bio,
         avatarUrl: schema.users.avatarUrl,
+        planetTheme: schema.users.planetTheme,
       })
       .from(schema.users)
       .where(eq(schema.users.id, user.id)),
@@ -28,6 +29,8 @@ export async function GET(): Promise<NextResponse> {
     nickname: me?.nickname ?? user.nickname,
     bio: me?.bio ?? null,
     avatarUrl: me?.avatarUrl ?? null,
+    // 행성 테마 — 바꾸면 은하가 다시 불러오지 않고도 바로 반영되도록 여기서 함께 내린다
+    planetTheme: me?.planetTheme ?? null,
     ...state,
   });
 }

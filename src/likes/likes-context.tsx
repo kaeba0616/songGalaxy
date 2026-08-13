@@ -19,6 +19,8 @@ export interface AuthState {
   likesCount: number;
   /** 내 별 좌표 (없으면 아직 미탄생) */
   star: { x: number; y: number; z: number } | null;
+  /** 내 행성 테마 slug — 바꾸면 은하가 다시 불러오지 않고도 밤하늘에 바로 반영된다 */
+  planetTheme?: string | null;
 }
 
 /** 좋아요 토글 결과 — 별 탄생 연출 등 화면별 후처리에 쓴다 */
@@ -39,6 +41,8 @@ interface LikesValue {
   setNickname: (nickname: string) => void;
   /** 프로필 저장 후 사진 갱신 — 빈 값이면 닉네임 첫 글자로 되돌아간다 */
   setAvatarUrl: (avatarUrl: string | null) => void;
+  /** 행성 테마 변경 직후 갱신 — 은하가 이 값을 보고 밤하늘 색을 바로 바꾼다 */
+  setPlanetTheme: (slug: string) => void;
 }
 
 const LikesContext = createContext<LikesValue | null>(null);
@@ -70,6 +74,7 @@ export function LikesProvider({ children }: { children: React.ReactNode }) {
           likedIds?: number[];
           likesCount?: number;
           star?: { x: number; y: number; z: number } | null;
+          planetTheme?: string | null;
         } | null) => {
           if (!data || !alive) return;
           setAuth({
@@ -80,6 +85,7 @@ export function LikesProvider({ children }: { children: React.ReactNode }) {
             likedIds: new Set(data.likedIds ?? []),
             likesCount: data.likesCount ?? 0,
             star: data.star ?? null,
+            planetTheme: data.planetTheme ?? null,
           });
         },
       )
@@ -137,13 +143,16 @@ export function LikesProvider({ children }: { children: React.ReactNode }) {
     setAuth((prev) => ({ ...prev, nickname }));
   }, []);
 
+  const setPlanetTheme = useCallback((slug: string) => {
+    setAuth((prev) => ({ ...prev, planetTheme: slug }));
+  }, []);
   const setAvatarUrl = useCallback((avatarUrl: string | null) => {
     setAuth((prev) => ({ ...prev, avatarUrl }));
   }, []);
 
   const value = useMemo<LikesValue>(
-    () => ({ auth, toggleLike, setNickname, setAvatarUrl }),
-    [auth, toggleLike, setNickname, setAvatarUrl],
+    () => ({ auth, toggleLike, setNickname, setAvatarUrl, setPlanetTheme }),
+    [auth, toggleLike, setNickname, setAvatarUrl, setPlanetTheme],
   );
 
   return <LikesContext.Provider value={value}>{children}</LikesContext.Provider>;
