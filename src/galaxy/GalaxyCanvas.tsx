@@ -37,6 +37,13 @@ const SONG_LABEL_POOL = 24;
 const SONG_ZOOM_DISTANCE = 16;
 /** 하단 카드 캐러셀에 띄우는 최대 곡 수 (인기순) */
 const CARD_LIMIT = 150;
+/**
+ * 밤하늘 지면의 바닥 밝기 — 별빛(uStarGlow) 색을 이만큼 항상 깔아 둔다.
+ * 지면을 비추는 조명은 지면 셰이더뿐이고 테마 바탕색(`ground`)은 어느
+ * 팔레트에서든 거의 검정이라(#0a141c 등), 이게 없으면 심장에서 멀어질수록
+ * 완전한 암흑이 된다 — 걷기 전에는 지평선이 30이라 드러나지 않던 문제다.
+ */
+const GROUND_AMBIENT = 0.18;
 
 /** 계정 드롭다운 항목 공통 스타일 — 항목마다 베끼면 한 줄만 어긋나도 티가 난다 */
 const MENU_ITEM =
@@ -1174,8 +1181,13 @@ export default function GalaxyCanvas({
             // (안 그러면 300 같은 정수가 셰이더 컴파일을 조용히 런타임에서만 깨뜨린다)
             float d = distance(vLocal, vec3(0.0, ${GROUND_RADIUS.toFixed(1)}, 0.0));
             float pulse = 0.85 + 0.15 * sin(uTime * 1.4);
-            // 발밑(별의 심장)에서 배어나오는 별빛 — 멀어질수록 잦아든다
-            vec3 col = uGround + uStarGlow * exp(-d / 60.0) * 0.85 * pulse;
+            // 걸어서 심장을 떠나도 지면이 보이게 하는 바닥 밝기. uGround는 어느
+            // 팔레트에서든 거의 검정이고 이 셰이더 말고는 지면을 비추는 조명이
+            // 없어서, 이게 없으면 6초만 걸어도(글로우 2%) 완전한 암흑이 된다
+            vec3 col = uGround + uStarGlow * ${GROUND_AMBIENT.toFixed(2)};
+            // 발밑(별의 심장)에서 배어나오는 별빛 — 멀어질수록 잦아든다.
+            // 멀어지면 사라지는 것이 의도다: 돌아오면 다시 밝아지는 표식이 된다
+            col += uStarGlow * exp(-d / 60.0) * 0.85 * pulse;
             gl_FragColor = vec4(col, 1.0);
           }
         `,
