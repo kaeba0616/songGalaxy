@@ -102,13 +102,15 @@ export default function WalkStick({ onChange }: { onChange: (v: StickValue) => v
       onPointerCancel={end}
       aria-label="행성 위 이동"
       /* touch-none: 없으면 브라우저가 스크롤 제스처로 가져가 조작이 끊긴다.
-         bottom-24(96px): 알약형 미니플레이어(MiniPlayer.tsx)가 기본 위치(bottom-4)에서
-         높이 약 56px(테두리 2px + 상하 패딩 16px + 내용부 36px)로 뜨므로 위쪽 끝이
-         화면 바닥에서 약 72px다. z-index를 올려 알약 위로 덮으면 알약의 ♥/+/⏮/▶/⏭
-         버튼이 조이스틱의 투명한 박스에 가려 눌리지 않으므로, 겹치지 않도록 세로로
-         띄운다(24px 여유) — MiniPlayer는 fixed z-40이라 GalaxyCanvas 컨테이너의
-         relative(z-index: auto) 안에서 이 조이스틱의 z-10과 그냥 겹친다 */
-      className="absolute bottom-24 left-4 z-10 grid h-28 w-28 touch-none place-items-center rounded-full border border-white/15 bg-black/35 backdrop-blur"
+         bottom: 화면 아래를 차지하는 것 위에 앉아야 한다. 둘은 동시에 뜨지 않는다 —
+         곡 캐러셀이 뜨면 알약형 미니플레이어는 숨는다(MiniPlayer의 uiHosted).
+           · 캐러셀이 있을 때: 높이가 곡 제목·접힘에 따라 달라져 --sky-cards-h로 받는다.
+             하드코딩하면 카드 그림 위에 겹쳐 앉는다.
+           · 알약만 있을 때: 알약은 bottom-4에 높이 약 56px(테두리 2 + 패딩 16 + 내용 36)
+             이라 위쪽 끝이 바닥에서 약 72px — 5rem이면 넘는다.
+         z-index를 올려 덮지 않는 이유: 알약의 ♥/+/⏮/▶/⏭가 조이스틱의 투명한 박스에
+         가려 눌리지 않게 된다(MiniPlayer는 fixed z-40, 이쪽은 z-10). 세로로 비킨다. */
+      className="absolute bottom-[calc(0.5rem+max(5rem,var(--sky-cards-h,0px)))] left-4 z-10 grid h-28 w-28 touch-none place-items-center rounded-full border border-white/15 bg-black/35 backdrop-blur"
     >
       <div
         style={{ transform: `translate(${knob.x}px, ${knob.y}px)` }}

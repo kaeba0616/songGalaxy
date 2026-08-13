@@ -199,6 +199,33 @@ export default function GalaxyCanvas({
   useEffect(() => {
     cardsCollapsedRef.current = cardsCollapsed;
   }, [cardsCollapsed]);
+  /**
+   * 곡 캐러셀이 화면 아래를 얼마나 덮는지 --sky-cards-h로 알린다. 폰의 걷기
+   * 조이스틱이 이 위에 앉아야 하는데, 캐러셀 높이는 곡 제목 길이와 접힘 여부에
+   * 따라 달라져서 하드코딩하면 카드 위에 겹쳐 앉는다(영상 레일의 --video-rail-h와 같은 방식).
+   */
+  const cardsWrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    const clear = () => root.style.setProperty("--sky-cards-h", "0px");
+    const el = cardsWrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") {
+      clear();
+      return clear;
+    }
+    // 접히면 아래로 밀려나 6.75rem(108px)만 보인다 — 실제로 가리는 만큼만 센다
+    const apply = () => {
+      const h = cardsCollapsed ? 108 : Math.round(el.getBoundingClientRect().height);
+      root.style.setProperty("--sky-cards-h", `${h}px`);
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      clear();
+    };
+  }, [cards, cardsCollapsed]);
   // 새 목록이 열리면 펼친 상태로 시작
   useEffect(() => {
     if (cards) setCardsCollapsed(false);
@@ -2529,6 +2556,7 @@ export default function GalaxyCanvas({
           이어지면서 버튼만 레일 밖으로 나온다. 레일이 없으면 --video-rail-w가 0px */}
       {cards && (
         <div
+          ref={cardsWrapRef}
           className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pb-4 pt-8 pr-[var(--video-rail-w,0px)] transition-transform duration-300 ease-out"
           style={{
             /* 접힘: 상단 여백(pt-8) + 곡 정보 줄(h-10) + 재생 컨트롤 줄만 남긴다 */
