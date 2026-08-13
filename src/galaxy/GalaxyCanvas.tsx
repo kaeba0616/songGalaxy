@@ -328,19 +328,12 @@ export default function GalaxyCanvas({
       setTimeout(() => setToast(null), 2500);
     }
   }, [profile, setNickname, setAvatarUrl]);
-  /** 좋아요 별 강조(더 크고 밝게) 표시 여부 — localStorage 유지 */
-  const [likedGlowOn, setLikedGlowOn] = useState(true);
-  /** 씬의 좋아요 별 강조 갱신 API (three 이펙트가 채움) — 빈 배열이면 강조 제거 */
+  /**
+   * 씬의 좋아요 별 강조 갱신 API (three 이펙트가 채움).
+   * 예전엔 메뉴에서 켜고 끌 수 있었는데, 끄면 내 별이 은하에서 사라진 것처럼 보여
+   * 다시 켜는 항목을 찾아야 했다. 좋아요 별은 늘 강조한다.
+   */
   const likedGlowApiRef = useRef<((likedIds: number[]) => void) | null>(null);
-  useEffect(() => {
-    if (localStorage.getItem("songgalaxy-liked-glow") === "off") setLikedGlowOn(false);
-  }, []);
-  const toggleLikedGlow = useCallback(() => {
-    setLikedGlowOn((on) => {
-      localStorage.setItem("songgalaxy-liked-glow", on ? "off" : "on");
-      return !on;
-    });
-  }, []);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
   /** 카드 스크롤 시 화면에 들어온 카드들을 보강 */
@@ -608,10 +601,10 @@ export default function GalaxyCanvas({
     return () => clearTimeout(t);
   }, [focusMyStar, authState.star]);
 
-  // 좋아요 별 강조 동기화 — 좋아요 목록·토글이 바뀌거나 씬이 준비되면 다시 그린다
+  // 좋아요 별 강조 동기화 — 좋아요 목록이 바뀌거나 씬이 준비되면 다시 그린다
   useEffect(() => {
-    likedGlowApiRef.current?.(likedGlowOn ? [...authState.likedIds] : []);
-  }, [authState.likedIds, likedGlowOn, status]);
+    likedGlowApiRef.current?.([...authState.likedIds]);
+  }, [authState.likedIds, status]);
 
   /** 내 별로 이동 — 행성 모드에서는 은하 좌표 비행이 카메라를 깨뜨리므로 착륙 전환으로 동작 */
   const goMyStar = useCallback(() => {
@@ -624,9 +617,10 @@ export default function GalaxyCanvas({
       }
       return;
     }
-    const s = authState.star;
-    if (s) flyToPosRef.current?.(s.x, s.y, s.z, 120);
-  }, [skyInfo, authState.userId, authState.star]);
+    // 은하에서도 착륙까지 간다 — landOnStar가 내 별로 날아가는 연출을 포함하므로,
+    // 예전처럼 flyTo로 확대만 하면 도착해 놓고 별을 한 번 더 눌러야 했다
+    if (authState.userId != null) landByUserRef.current?.(authState.userId);
+  }, [skyInfo, authState.userId]);
 
   /** 행성 링크 복사 */
   const copyPlanetLink = useCallback(() => {
@@ -2279,6 +2273,20 @@ export default function GalaxyCanvas({
                     </span>
                     <span className="block text-[11px] text-white/35">(으)로 로그인됨</span>
                   </span>
+                  {/* 프로필 설정 — 내 계정 줄에 붙여야 "내 것을 손보는 곳"으로 읽힌다.
+                      아래 목록에 두면 곡 목록·로그아웃 사이에 섞여 성격이 흐려진다 */}
+                  <button
+                    type="button"
+                    aria-label="프로필 설정"
+                    title="프로필 설정"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setProfileOpen(true);
+                    }}
+                    className="ml-auto grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-white/45 transition hover:bg-white/10 hover:text-white"
+                  >
+                    ⚙
+                  </button>
                 </>
               ) : (
                 <span>
@@ -2303,19 +2311,14 @@ export default function GalaxyCanvas({
                     ✦ 내 별로 이동
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    toggleLikedGlow();
-                  }}
-                  className={MENU_ITEM}
-                >
-                  {likedGlowOn ? "🌟 좋아요 별 강조 끄기" : "🌟 좋아요 별 강조 켜기"}
-                </button>
-                <Link href="/me" onClick={() => setMenuOpen(false)} className={MENU_ITEM}>
-                  ♥ 내 취향 페이지
-                </Link>
+                {/* 내 취향 페이지 — 내 행성에 서 있을 때만 보인다.
+                    은하에서는 "내 별로 이동"이 같은 곳(내 별)으로 데려가는 입구라
+                    출구가 둘로 보이고, 남의 행성에서는 내 취향을 여는 게 맥락에 맞지 않는다 */}
+                {skyInfo?.userId === authState.userId && (
+                  <Link href="/me" onClick={() => setMenuOpen(false)} className={MENU_ITEM}>
+                    ♥ 내 취향 페이지
+                  </Link>
+                )}
               </>
             ) : (
               <a
@@ -2379,16 +2382,6 @@ export default function GalaxyCanvas({
             {authState.authenticated && (
               <>
                 <div className="my-1 border-t border-white/10" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    setProfileOpen(true);
-                  }}
-                  className={MENU_ITEM}
-                >
-                  ⚙ 프로필 설정
-                </button>
                 <a
                   href="/api/auth/signout?callbackUrl=/"
                   className={`${MENU_ITEM} text-white/50`}

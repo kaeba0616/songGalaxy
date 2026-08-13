@@ -15,48 +15,126 @@ import { hashString, mulberry32 } from "@/lib/layout-math";
 const SKY_RADIUS = 430;
 
 /**
- * 지면 오브젝트용 재질. 조명이 없는 씬이라 MeshBasic을 쓰는데, 처음엔 이걸
- * theme.ground를 밝기만 달리해(x0.7~x1.6) 만들었다가 실전에서 안 보이는 버그가 났다 —
- * ground 자체가 거의 검정(#0a141c 등)이라 몇 배를 곱해도 여전히 지면과 한 자리 수 차이라,
- * 조명 없는 화면에서는 "지면과 같은 색이라 파묻혀 안 보인다". 언덕 실루엣(x0.55)은
- * 하늘이라는 밝은 배경 위라 괜찮지만, 지면 오브젝트의 배경은 지면 그 자체다.
- * 그래서 대신 테마의 밝은 포인트색(glow)을 기준으로 삼는다 — glow는 모든 테마에서
- * ground보다 확실히 밝게 설계돼 있어(팔레트: planet-themes.ts), 배율을 조절해도
- * 지면과 섞이지 않는다.
+ * 지면 오브젝트가 지면에 파묻히지 않는 최소 밝기(사람 눈 기준 휘도).
+ * 지면은 어느 테마에서도 거의 검정(#0a141c 등, 휘도 0.08 미만)이고 씬에 조명이
+ * 없어서, 이 아래로 내려가면 "색이 있는데 안 보이는" 상태가 된다. 실제로 예전에
+ * theme.ground를 밝기만 달리해 쓰다가 오브젝트가 통째로 안 보이는 버그가 났다.
  */
-function glowTone(theme: PlanetTheme, mul: number): THREE.MeshBasicMaterial {
-  return new THREE.MeshBasicMaterial({ color: new THREE.Color(theme.glow).multiplyScalar(mul) });
+const MIN_LUMA = 0.34;
+
+/** 사람 눈 기준 휘도 — 같은 밝기라도 초록이 파랑보다 밝게 보이는 것을 반영한다 */
+function luma(c: THREE.Color): number {
+  return c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
 }
+
+/**
+ * 꾸미기 오브젝트의 색.
+ *
+ * 예전에는 전부 `theme.glow`를 밝기만 달리해 만들었다. 지면에 안 묻히는 건
+ * 해결됐지만 나무도 바위도 호수도 전부 한 가지 색이라 단색으로 보였다.
+ * 그래서 **사물의 고유색(base)을 쓰되** 두 가지를 건다:
+ *
+ * 1. `tint`만큼 테마색 쪽으로 섞는다 — 행성마다 색조가 달라 한 화면에서 따로 놀지 않는다
+ * 2. 휘도가 MIN_LUMA 아래면 색조(hue)는 그대로 두고 밝기만 끌어올린다 —
+ *    고유색을 주면서도 "지면에 묻혀 안 보이는" 옛 버그로 돌아가지 않게 하는 안전장치
+ */
+function decorTone(
+  theme: PlanetTheme,
+  base: string,
+  opts: { tint?: number; mul?: number } = {},
+): THREE.Color {
+  const { tint = 0.26, mul = 1 } = opts;
+  const c = new THREE.Color(base).lerp(new THREE.Color(theme.glow), tint).multiplyScalar(mul);
+  const l = luma(c);
+  if (l < MIN_LUMA) c.multiplyScalar(MIN_LUMA / Math.max(l, 0.001));
+  return c;
+}
+
+function decorMat(
+  theme: PlanetTheme,
+  base: string,
+  opts: { tint?: number; mul?: number } = {},
+): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({ color: decorTone(theme, base, opts) });
+}
+
+/** 같은 종류라도 개체마다 색조를 조금씩 흔든다 — 마인크래프트·동물의 숲의 그 느낌 */
+function jitter(hex: string, rng: () => number, amount = 0.06): string {
+  const c = new THREE.Color(hex);
+  const hsl = { h: 0, s: 0, l: 0 };
+  c.getHSL(hsl);
+  c.setHSL(
+    (hsl.h + (rng() - 0.5) * amount + 1) % 1,
+    Math.min(1, Math.max(0, hsl.s + (rng() - 0.5) * 0.18)),
+    Math.min(1, Math.max(0, hsl.l + (rng() - 0.5) * 0.14)),
+  );
+  return `#${c.getHexString()}`;
+}
+
+/** 나무 — 갈색 줄기 + 2단 초록 잎, 그루마다 초록이 조금씩 다르다.
+ *  줄기는 처음에 짙은 갈색(#7a4f2e)이었는데, 그 밝기로는 MIN_LUMA에 걸려
+ *  통째로 끌어올려지면서 분홍빛으로 떴다 — 어두운 색을 밝히면 색조가 뜬다.
+ *  애초에 하한을 넘는 밝은 갈색을 쓰고 테마 혼합도 줄여 갈색으로 남긴다. */
+const TRUNK = "#a06a3c";
+const LEAF = "#4c9e46";
+/** 발치의 들꽃 — 초록 사이에서 튀라고 일부러 채도 높은 색만 쓴다 */
+const FLOWERS = ["#e8617d", "#f2c53d", "#f3f0e6", "#8f6fd6"];
 
 function trees(theme: PlanetTheme, rng: () => number): THREE.Object3D {
   const g = new THREE.Group();
-  const trunkMat = glowTone(theme, 0.55);
-  const leafMat = glowTone(theme, 1.1);
   const n = 3 + Math.floor(rng() * 2);
   for (let i = 0; i < n; i++) {
     const h = 8 + rng() * 6;
+    const trunkMat = decorMat(theme, jitter(TRUNK, rng, 0.03), { tint: 0.07 });
+    // 잎은 위가 밝고 아래가 어둡다 — 조명이 없어도 덩어리감이 생긴다
+    const leafTop = decorMat(theme, jitter(LEAF, rng, 0.1), { mul: 1.12 });
+    const leafLow = decorMat(theme, jitter(LEAF, rng, 0.1), { mul: 0.82 });
     const t = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.8, h * 0.45, 6), trunkMat);
-    const leaf = new THREE.Mesh(new THREE.ConeGeometry(h * 0.32, h * 0.7, 7), leafMat);
+    const low = new THREE.Mesh(new THREE.ConeGeometry(h * 0.34, h * 0.42, 7), leafLow);
+    const top = new THREE.Mesh(new THREE.ConeGeometry(h * 0.25, h * 0.4, 7), leafTop);
     t.position.y = h * 0.225;
-    leaf.position.y = h * 0.6;
+    low.position.y = h * 0.52;
+    top.position.y = h * 0.78;
     const one = new THREE.Group();
-    one.add(t, leaf);
+    one.add(t, low, top);
     one.position.set((rng() - 0.5) * 26, 0, (rng() - 0.5) * 26);
     g.add(one);
+  }
+  // 들꽃 몇 송이 — 초록·갈색만 있으면 밤에 한 덩어리로 보인다
+  for (let i = 0; i < 7; i++) {
+    const petal = new THREE.Mesh(
+      new THREE.SphereGeometry(0.5, 6, 5),
+      decorMat(theme, FLOWERS[Math.floor(rng() * FLOWERS.length)], { tint: 0.12, mul: 1.15 }),
+    );
+    petal.position.set((rng() - 0.5) * 30, 0.5, (rng() - 0.5) * 30);
+    g.add(petal);
   }
   return g;
 }
 
+/** 바위 — 푸른기 도는 회색 돌, 덩어리마다 색이 조금씩 다르다 */
+const STONE = "#8b929c";
+const MOSS = "#6aa84f";
+
 function rocks(theme: PlanetTheme, rng: () => number): THREE.Object3D {
   const g = new THREE.Group();
-  const mat = glowTone(theme, 0.85);
   const n = 2 + Math.floor(rng() * 2);
   for (let i = 0; i < n; i++) {
     const r = 3 + rng() * 3;
-    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), mat);
+    const m = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(r, 0),
+      decorMat(theme, jitter(STONE, rng, 0.05), { tint: 0.3 }),
+    );
     m.position.set((rng() - 0.5) * 18, r * 0.4, (rng() - 0.5) * 18);
     m.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-    g.add(m);
+    // 위쪽에 낀 이끼 한 조각 — 회색만 있으면 돌이 아니라 그냥 덩어리로 보인다
+    const moss = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(r * 0.55, 0),
+      decorMat(theme, jitter(MOSS, rng, 0.08), { tint: 0.18 }),
+    );
+    moss.position.set(m.position.x + r * 0.25, m.position.y + r * 0.62, m.position.z - r * 0.2);
+    moss.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+    g.add(m, moss);
   }
   return g;
 }
@@ -66,21 +144,42 @@ function obelisk(theme: PlanetTheme): THREE.Object3D {
   // 메시를 그대로 돌려주면 아래에서 준 y 오프셋이 사라져 오브젝트가 지면에 반쯤 묻힌다
   const g = new THREE.Group();
   const h = 24;
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 2.4, h, 4), glowTone(theme, 0.75));
+  const m = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.1, 2.4, h, 4),
+    decorMat(theme, "#cbb185", { tint: 0.22 }),   // 사암
+  );
   m.position.y = h / 2;
   m.rotation.y = Math.PI / 4;
-  g.add(m);
+  // 꼭대기만 테마색 — 멀리서도 "저 행성의 것"으로 읽히는 표식
+  const cap = new THREE.Mesh(
+    new THREE.OctahedronGeometry(2.1, 0),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(theme.glow).multiplyScalar(1.35) }),
+  );
+  cap.position.y = h + 1.4;
+  g.add(m, cap);
   return g;
 }
 
 function lighthouse(theme: PlanetTheme): THREE.Object3D {
   const g = new THREE.Group();
   const h = 28;
-  const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.2, h, 10), glowTone(theme, 0.75));
-  tower.position.y = h / 2;
+  // 흰-빨강 가로줄 등대 — 단색 기둥이면 오벨리스크와 실루엣이 구분되지 않는다.
+  // 원기둥을 4토막으로 나눠 번갈아 칠한다(밑이 굵은 형태는 그대로 유지)
+  const BANDS = 4;
+  const tower = new THREE.Group();
+  for (let i = 0; i < BANDS; i++) {
+    const y0 = (h / BANDS) * i;
+    const rAt = (y: number) => 3.2 + (1.6 - 3.2) * (y / h); // 밑 3.2 → 위 1.6
+    const seg = new THREE.Mesh(
+      new THREE.CylinderGeometry(rAt(y0 + h / BANDS), rAt(y0), h / BANDS, 10),
+      decorMat(theme, i % 2 === 0 ? "#f2efe6" : "#cf4a3f", { tint: 0.14 }),
+    );
+    seg.position.y = y0 + h / BANDS / 2;
+    tower.add(seg);
+  }
   const lamp = new THREE.Mesh(
     new THREE.SphereGeometry(2.2, 12, 8),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(theme.glow) }),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(theme.glow).multiplyScalar(1.3) }),
   );
   lamp.position.y = h + 1.5;
   // 천천히 도는 빛줄기 — 애니메이션은 GalaxyCanvas의 프레임 루프가 돌린다
@@ -112,21 +211,33 @@ function lake(theme: PlanetTheme, rng: () => number, distance: number): THREE.Ob
   // 감안해도 거리를 넘지 않게 잡았다 (0.45 * 1.25 = 0.5625, 즉 최악의 경우도 거리의
   // 56%까지만 차오른다)
   const r = distance * (0.3 + rng() * 0.15);
-  // 반투명이라 뒤의(거의 검정인) 지면과 섞인 결과로 보인다 — 예전 배율(x0.5, 불투명도 .55)은
-  // 섞고 나면 지면과 몇 단만 차이 나 안 보였다. glow를 거의 그대로 쓰고 불투명도도 올려서
-  // "하늘빛이 비치는 수면"이 지면과 확실히 갈라지게 한다
+  // 반투명이라 뒤의(거의 검정인) 지면과 섞인 결과로 보인다 — 불투명도를 낮추면
+  // 섞이고 나서 지면과 몇 단만 차이 나 안 보인다. 물빛을 쓰되 불투명도는 높게 유지한다
   const m = new THREE.Mesh(
     new THREE.CircleGeometry(r, 32),
     new THREE.MeshBasicMaterial({
-      color: new THREE.Color(theme.glow).multiplyScalar(0.9),
+      color: decorTone(theme, "#3f9fd4", { tint: 0.32 }),
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.78,
       depthWrite: false,
     }),
   );
   m.rotation.x = -Math.PI / 2;
   m.position.y = 0.2; // 지면과 z-파이팅하지 않게 살짝 띄운다
-  g.add(m);
+  // 물가 — 모래 테두리가 있어야 물이 "고여 있는 것"으로 읽힌다
+  const shore = new THREE.Mesh(
+    new THREE.RingGeometry(r, r * 1.13, 32),
+    new THREE.MeshBasicMaterial({
+      color: decorTone(theme, "#d9c08a", { tint: 0.2 }),
+      transparent: true,
+      opacity: 0.62,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  shore.rotation.x = -Math.PI / 2;
+  shore.position.y = 0.15;
+  g.add(shore, m);
   return g;
 }
 

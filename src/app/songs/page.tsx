@@ -118,7 +118,14 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
     (ext) => !ext.existingSongId || String(ext.existingSongId) === params.added,
   );
 
-  /** 현재 필터를 유지한 채 일부 파라미터만 바꾼 URL */
+  /**
+   * 현재 필터를 유지한 채 일부 파라미터만 바꾼 URL.
+   *
+   * 이 링크들은 전부 `replace`로 이동한다 — 페이지 넘기기·장르 고르기는 새로
+   * 도착한 곳이 아니라 **같은 목록을 좁혀 보는 것**이기 때문이다. push로 쌓으면
+   * 겹쳐 띄운 화면의 ✕(`RouteOverlay`, 뒤로 가기 한 칸)를 넘긴 횟수만큼 눌러야
+   * 은하가 나온다 — 2페이지 넘기면 ✕를 세 번 눌러야 했다.
+   */
   const pageUrl = (overrides: Partial<SongsSearchParams>) => {
     const merged = { q, field, cluster: cluster?.slug, genre, sort, page: String(page), ...overrides };
     const sp = new URLSearchParams();
@@ -149,6 +156,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
         {cluster && (
           <div className="mb-5 flex flex-wrap gap-1.5">
             <Link
+              replace
               href={pageUrl({ genre: undefined, page: "1" })}
               className={`rounded-full border px-3 py-1 text-xs transition ${!genre ? "border-white/50 bg-white/15" : "border-white/15 text-white/60 hover:bg-white/10"}`}
             >
@@ -157,6 +165,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
             {cluster.genres.map((g) => (
               <Link
                 key={g}
+                replace
                 href={pageUrl({ genre: g, page: "1" })}
                 className={`rounded-full border px-3 py-1 text-xs transition ${genre === g ? "border-white/50 bg-white/15" : "border-white/15 text-white/60 hover:bg-white/10"}`}
                 style={{ color: genre === g ? cluster.color : undefined }}
@@ -263,7 +272,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
         {totalPages > 1 && (
           <div className="mt-5 flex items-center justify-center gap-4 text-sm">
             {page > 1 ? (
-              <Link href={pageUrl({ page: String(page - 1) })} className="rounded-full border border-white/20 px-4 py-1.5 transition hover:bg-white/10">
+              <Link replace href={pageUrl({ page: String(page - 1) })} className="rounded-full border border-white/20 px-4 py-1.5 transition hover:bg-white/10">
                 ← 이전
               </Link>
             ) : (
@@ -273,7 +282,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
               {page} / {totalPages.toLocaleString()}
             </span>
             {page < totalPages ? (
-              <Link href={pageUrl({ page: String(page + 1) })} className="rounded-full border border-white/20 px-4 py-1.5 transition hover:bg-white/10">
+              <Link replace href={pageUrl({ page: String(page + 1) })} className="rounded-full border border-white/20 px-4 py-1.5 transition hover:bg-white/10">
                 다음 →
               </Link>
             ) : (

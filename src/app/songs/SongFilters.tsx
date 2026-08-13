@@ -40,7 +40,9 @@ export default function SongFilters({
       if (value) sp.set(key, String(value));
     }
     sp.set("page", "1");
-    startTransition(() => router.push(`/songs?${sp.toString()}`));
+    // replace: 검색·필터는 새 목적지가 아니라 같은 목록을 좁히는 것이다.
+    // push로 쌓으면 겹쳐 띄운 화면의 ✕(뒤로 가기 한 칸)를 그만큼 더 눌러야 한다
+    startTransition(() => router.replace(`/songs?${sp.toString()}`));
   };
 
   const selectClass =
