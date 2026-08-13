@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import { LikesProvider } from "@/likes/likes-context";
 import MiniPlayer from "@/player/MiniPlayer";
@@ -46,6 +47,12 @@ export default function RootLayout({
             <VideoStage />
           </PlayerProvider>
         </LikesProvider>
+        {/* Rybbit 방문 분석 — afterInteractive: 은하 로딩(3만 별)보다 뒤에 받는다 */}
+        <Script
+          src="https://analytics.earnlearning.com/api/script.js"
+          data-site-id="656e612ba35f"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );
