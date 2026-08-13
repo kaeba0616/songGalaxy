@@ -164,7 +164,7 @@ export default async function MePage() {
                     {song.genre}
                   </span>
                 </Link>
-                <LikeButton songId={song.id} initialLiked authenticated />
+                <LikeButton songId={song.id} />
               </li>
             ))}
             {total === 0 && (

@@ -21,6 +21,7 @@ import { useLikes } from "@/likes/likes-context";
 import { usePlayer } from "@/player/player-context";
 import type { PlayerQueue, PlayerSnapshot } from "@/player/player-context";
 import type { GalaxyPayload, GalaxyStar, GalaxyTheme } from "./types";
+import AddToPlaylistButton from "@/components/AddToPlaylistButton";
 import { buildDecor } from "./planet-decor-objects";
 import { PLANET_DECOR } from "@/config/planet-decor";
 import { GROUND_CENTER_OFFSET, GROUND_RADIUS, WALK_SPEED, surfaceNormal, walkStep } from "./planet-walk";
@@ -652,10 +653,32 @@ export default function GalaxyCanvas({
       }
       return;
     }
-    // 은하에서도 착륙까지 간다 — landOnStar가 내 별로 날아가는 연출을 포함하므로,
-    // 예전처럼 flyTo로 확대만 하면 도착해 놓고 별을 한 번 더 눌러야 했다
-    if (authState.userId != null) landByUserRef.current?.(authState.userId);
-  }, [skyInfo, authState.userId]);
+    // 은하에서는 별 앞까지 날아가기만 한다 — 착륙은 내가 별을 클릭해서.
+    // 바로 착륙시켜 봤더니 "내 별 주변 은하를 보러 온" 사람까지 끌려 들어갔다.
+    // 포커싱해 두면 보고 싶은 사람은 보고, 들어갈 사람은 한 번 눌러 들어간다
+    const s = authState.star;
+    if (s) flyToPosRef.current?.(s.x, s.y, s.z, 120);
+  }, [skyInfo, authState.userId, authState.star]);
+
+  /** 이 행성의 밤하늘(주인이 좋아요한 곡들)을 내 노래 목록으로 가져온다 */
+  const importSky = useCallback(async (fromUserId: number) => {
+    try {
+      const res = await fetch("/api/playlists/import-sky", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromUserId }),
+      });
+      const data = (await res.json()) as { name?: string; count?: number; error?: string };
+      setToast(
+        res.ok
+          ? `⤵ "${data.name}" 목록으로 ${data.count}곡을 가져왔어요`
+          : `⚠ ${data.error ?? "가져오지 못했어요"}`,
+      );
+    } catch {
+      setToast("⚠ 가져오지 못했어요. 잠시 후 다시 시도해주세요");
+    }
+    setTimeout(() => setToast(null), 4000);
+  }, []);
 
   /** 행성 링크 복사 */
   const copyPlanetLink = useCallback(() => {
@@ -1494,6 +1517,16 @@ export default function GalaxyCanvas({
         .then(
           (d: {
             songIds: number[];
+            songs?: {
+              id: number;
+              title: string;
+              artist: string;
+              x: number | null;
+              y: number | null;
+              z: number | null;
+              popularity: number;
+              themeId: number;
+            }[];
             likesCount?: number;
             lastLikedAt?: string | null;
             clusters?: PlanetInfo["clusters"];
@@ -1502,6 +1535,22 @@ export default function GalaxyCanvas({
             decor?: string[];
           }) => {
             if (pendingSky?.entry === entry) {
+              // 페이로드에 없는 좋아요 곡을 채워 넣는다 — 페이로드는 페이지 로드 때
+              // 한 번만 받으므로, 그 뒤 편입한 곡을 좋아요하면 여기 없어서 밤하늘
+              // 별 그리기(indexOf)에서 조용히 탈락했다. 컬럼형 배열 뒤에 붙이면
+              // 인덱스 기반 조회(별 클릭·라벨)가 전부 그대로 동작한다
+              if (payload && d.songs) {
+                const known = new Set(payload.songs.id);
+                for (const m of d.songs) {
+                  if (known.has(m.id) || m.x == null || m.y == null || m.z == null) continue;
+                  payload.songs.id.push(m.id);
+                  payload.songs.title.push(m.title);
+                  payload.songs.artist.push(m.artist);
+                  payload.songs.pos.push(m.x, m.y, m.z);
+                  payload.songs.popularity.push(m.popularity);
+                  payload.songs.themeId.push(m.themeId);
+                }
+              }
               let songIds = d.songIds ?? [];
               // 대표곡이 있으면 맨 앞으로 — 착륙 라디오가 이 곡부터 시작한다
               if (d.pinnedSongId != null && songIds.includes(d.pinnedSongId)) {
@@ -2405,6 +2454,19 @@ export default function GalaxyCanvas({
                 >
                   🔗 행성 링크 복사
                 </button>
+                {/* 남의 행성에서만 — 내 밤하늘을 내 목록으로 또 뜨는 건 의미가 없다 */}
+                {authState.authenticated && skyInfo.userId !== authState.userId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      void importSky(skyInfo.userId);
+                    }}
+                    className={MENU_ITEM}
+                  >
+                    ⤵ 이 행성 플리 가져오기
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -2600,6 +2662,19 @@ export default function GalaxyCanvas({
             walkKeysRef.current.right = v.right;
           }}
         />
+      )}
+
+      {/* 은하로 나가기 — 행성 화면 하단 가운데 텍스트 버튼. 계정 메뉴에도 같은
+          항목이 있지만 두 단계라, 나가는 길은 한 번에 보이는 곳에도 둔다.
+          곡 캐러셀이 열리면 그 위로 비킨다(--sky-cards-h, 조이스틱과 같은 방식) */}
+      {skyInfo && (
+        <button
+          type="button"
+          onClick={() => exitSkyRef.current?.()}
+          className="absolute bottom-[calc(1rem+var(--sky-cards-h,0px))] left-1/2 z-10 -translate-x-1/2 cursor-pointer rounded-full border border-white/15 bg-black/40 px-4 py-1.5 text-sm text-white/60 backdrop-blur transition hover:bg-black/60 hover:text-white"
+        >
+          ✦ 은하로 나가기
+        </button>
       )}
 
       {status === "error" && (
@@ -2812,17 +2887,12 @@ export default function GalaxyCanvas({
                       >
                         {authState.likedIds.has(song.id) ? "♥" : "♡"}
                       </button>
-                      {song.index >= 0 && (
-                        <button
-                          type="button"
-                          onClick={() => flySongRef.current?.(song.index)}
-                          className="grid h-7 w-7 place-items-center rounded-full border border-white/20 bg-white/10 text-xs text-white/70 transition hover:bg-white/20"
-                          aria-label={`${song.title} 별로 이동`}
-                          title="은하에서 이 별로 이동"
-                        >
-                          ✦
-                        </button>
-                      )}
+                      {/* 별로 이동(✦) 대신 목록에 담기 — 별로 가는 길은 카드 클릭·더블클릭이
+                          이미 있고, 담기는 여기 말고는 곡 목록 페이지까지 가야 했다 */}
+                      <AddToPlaylistButton
+                        songId={song.id}
+                        buttonClassName="grid h-7 w-7 cursor-pointer place-items-center rounded-full border border-white/20 bg-white/10 text-xs text-white/70 transition hover:bg-white/20 hover:text-white"
+                      />
                       {m?.previewUrl && (
                         <button
                           type="button"

@@ -17,7 +17,7 @@
  * 가로챈다(실측: 780px 폭에서 성단 라벨 10개가 전부 가려졌고, 클릭이 youtube.com을 새 탭으로
  * 열었다). 하단은 은하 카드 캐러셀(`inset-x-0 bottom-0`)이 쓰므로 비워 둔다.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { VIDEO_MIN_PX } from "@/config/constants";
 import { usePlayer } from "./player-context";
 import QueueList from "./QueueList";
@@ -35,6 +35,12 @@ export default function VideoStage() {
     playStep,
   } = usePlayer();
   const wrapRef = useRef<HTMLDivElement>(null);
+  /**
+   * 레일 전체 접힘 (sm 이상 전용). 화면 오른쪽 밖으로 밀어낼 뿐 언마운트하지
+   * 않는다 — iframe이 리마운트되면 재생이 처음부터 다시 시작된다. 그래서
+   * 접혀 있어도 소리는 계속 나온다("영상 접기"와 달리 재생을 멈추지 않는다).
+   */
+  const [railHidden, setRailHidden] = useState(false);
 
   /**
    * 레일/카드가 차지하는 크기를 CSS 변수로 알린다 — `globals.css`의 `main` 규칙이
@@ -58,7 +64,11 @@ export default function VideoStage() {
     const apply = () => {
       const rail = window.matchMedia("(min-width: 640px)").matches;
       const r = el.getBoundingClientRect();
-      root.style.setProperty("--video-rail-w", rail ? `${Math.round(r.width)}px` : "0px");
+      // 접힌 레일은 화면 밖에 있다 — 본문이 비켜 줄 이유가 없다
+      root.style.setProperty(
+        "--video-rail-w",
+        rail && !railHidden ? `${Math.round(r.width)}px` : "0px",
+      );
       // 카드는 top-20(5rem) 아래에 떠 있으므로 그 시작 위치까지 포함해 비운다.
       // 단, 높이가 0이면(폰에서 영상도 "펼치기" 버튼도 재생 목록도 안 그려지는 상태 —
       // stageVideoId는 있지만 engine !== "youtube"이고 videoExpanded가 false인 경우)
@@ -76,7 +86,7 @@ export default function VideoStage() {
       // 무대가 내려가면 여백도 걷는다 — 안 그러면 영상이 끝난 뒤에도 빈 자리가 남는다
       clear();
     };
-  }, [stageVideoId, videoExpanded]);
+  }, [stageVideoId, videoExpanded, railHidden]);
 
   if (stageVideoId === null) return null;
 
@@ -86,8 +96,19 @@ export default function VideoStage() {
       /* sm 이상: 오른쪽 전체 높이 레일. 미만: 지금처럼 우측 상단에 떠 있는 카드
          (폰에는 세로 레일을 둘 폭이 없다). 모양 전환은 CSS만으로 한다 —
          iframe은 DOM에서 부모가 바뀌면 문서를 새로 로드해 재생이 처음부터 다시 시작된다 */
-      className="fixed right-4 top-20 z-40 w-[min(92vw,420px)] sm:inset-y-0 sm:right-0 sm:top-0 sm:flex sm:w-[360px] sm:flex-col sm:border-l sm:border-white/10 sm:bg-black/85 sm:backdrop-blur"
+      className={`fixed right-4 top-20 z-40 w-[min(92vw,420px)] sm:inset-y-0 sm:right-0 sm:top-0 sm:flex sm:w-[360px] sm:flex-col sm:border-l sm:border-white/10 sm:bg-black/85 sm:backdrop-blur sm:transition-transform sm:duration-300 ${railHidden ? "sm:translate-x-full" : ""}`}
     >
+      {/* 레일 왼쪽 가장자리의 접기 탭 — 래퍼 밖으로 삐져나와 있어(-translate-x-full)
+          레일이 화면 밖으로 밀려나도 이 탭만 남는다. 소리는 계속 나온다 */}
+      <button
+        type="button"
+        onClick={() => setRailHidden((v) => !v)}
+        aria-label={railHidden ? "재생 창 펼치기" : "재생 창 접기"}
+        title={railHidden ? "재생 창 펼치기" : "재생 창 접기"}
+        className="absolute left-0 top-1/2 hidden h-16 w-6 -translate-x-full -translate-y-1/2 cursor-pointer place-items-center rounded-l-xl border border-r-0 border-white/15 bg-black/85 text-white/60 backdrop-blur transition hover:text-white sm:grid"
+      >
+        {railHidden ? "‹" : "›"}
+      </button>
       <div
         className={
           videoExpanded

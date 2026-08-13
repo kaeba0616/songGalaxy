@@ -26,8 +26,22 @@ export async function GET(
   const big = alias(schema.themes, "big");
   const [rows, clusterRows, [owner], decor] = await Promise.all([
     db
-      .select({ songId: schema.likes.songId, at: schema.likes.createdAt })
+      // 곡 메타까지 내린다 — 은하 페이로드는 페이지 로드 때 한 번만 받아서,
+      // 그 뒤 편입된 곡을 좋아요하면 클라이언트 페이로드에 없다. 행성이 이걸로
+      // 빠진 곡을 페이로드에 채워 넣어야 밤하늘에서 곡이 사라지지 않는다
+      .select({
+        songId: schema.likes.songId,
+        at: schema.likes.createdAt,
+        title: schema.songs.title,
+        artist: schema.songs.artist,
+        x: schema.songs.posX,
+        y: schema.songs.posY,
+        z: schema.songs.posZ,
+        popularity: schema.songs.popularity,
+        themeId: schema.songs.themeId,
+      })
       .from(schema.likes)
+      .innerJoin(schema.songs, eq(schema.likes.songId, schema.songs.id))
       .where(eq(schema.likes.userId, userId))
       .orderBy(desc(schema.likes.createdAt)),
     db
@@ -49,6 +63,16 @@ export async function GET(
   return NextResponse.json(
     {
       songIds: rows.map((r) => r.songId),
+      songs: rows.map((r) => ({
+        id: r.songId,
+        title: r.title,
+        artist: r.artist,
+        x: r.x,
+        y: r.y,
+        z: r.z,
+        popularity: r.popularity,
+        themeId: r.themeId,
+      })),
       likesCount: rows.length,
       lastLikedAt: rows[0]?.at ?? null,
       bio: owner?.bio ?? null,

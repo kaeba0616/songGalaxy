@@ -391,3 +391,32 @@ export function getPlaylistById(id: number): Promise<PlaylistDetail | null> {
 export function getPlaylistBySlug(slug: string): Promise<PlaylistDetail | null> {
   return loadDetail(eq(schema.playlists.shareSlug, slug));
 }
+
+/**
+ * 다른 사람의 밤하늘(좋아요 곡)을 내 새 목록으로 가져온다.
+ * 좋아요는 공개 정보다 — 행성에 착륙하면 누구나 듣는 그 목록이므로 복제에
+ * 소유 검사가 필요 없다. 목록 이름이 이미 있으면 (2), (3)…을 붙인다.
+ */
+export async function importUserSky(
+  userId: number,
+  fromUserId: number,
+): Promise<{ id: number; name: string; count: number } | "empty"> {
+  const rows = await db
+    .select({ songId: schema.likes.songId, nickname: schema.users.nickname })
+    .from(schema.likes)
+    .innerJoin(schema.users, eq(schema.users.id, schema.likes.userId))
+    .where(eq(schema.likes.userId, fromUserId))
+    .orderBy(desc(schema.likes.createdAt));
+  if (rows.length === 0) return "empty";
+
+  const base = `${rows[0].nickname}의 밤하늘`;
+  const mine = await listMyPlaylists(userId);
+  let name = base;
+  for (let n = 2; mine.some((p) => p.name === name); n++) name = `${base} (${n})`;
+
+  const created = await createPlaylist(userId, name);
+  await db.insert(schema.playlistSongs).values(
+    rows.map((r, i) => ({ playlistId: created.id, songId: r.songId, position: i })),
+  );
+  return { id: created.id, name, count: rows.length };
+}

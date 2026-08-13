@@ -1,8 +1,10 @@
 import Link from "next/link";
-import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db, schema } from "@/db";
 import { GENRE_CLUSTERS } from "@/config/genre-clusters";
 import AddToPlaylistButton from "@/components/AddToPlaylistButton";
+import LikeButton from "@/components/LikeButton";
 import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits from "@/components/DataCredits";
 import { searchExternal } from "@/server/import-song";
@@ -40,16 +42,22 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
   const page = Math.max(1, Number(params.page) || 1);
 
   const conditions: SQL[] = [];
+  /**
+   * 공백을 무시하는 부분 일치 — 외부 검색(iTunes)과 결과를 맞추기 위해서다.
+   * iTunes는 "Humpback"으로 밴드 "Hump Back"을 찾아주는데 ilike '%humpback%'는
+   * 공백 때문에 놓친다 — 같은 화면의 두 검색이 다른 답을 내면 고장으로 보인다.
+   */
+  const norm = q.toLowerCase().replace(/\s+/g, "");
+  const spaceless = (col: AnyPgColumn): SQL =>
+    sql`replace(lower(${col}), ' ', '') LIKE ${"%" + norm + "%"}`;
   if (q) {
     // 검색 대상 필터 — 제목만/가수만/전체(제목+가수)
     if (field === "title") {
-      conditions.push(ilike(schema.songs.title, `%${q}%`));
+      conditions.push(spaceless(schema.songs.title));
     } else if (field === "artist") {
-      conditions.push(ilike(schema.songs.artist, `%${q}%`));
+      conditions.push(spaceless(schema.songs.artist));
     } else {
-      conditions.push(
-        or(ilike(schema.songs.title, `%${q}%`), ilike(schema.songs.artist, `%${q}%`))!,
-      );
+      conditions.push(or(spaceless(schema.songs.title), spaceless(schema.songs.artist))!);
     }
   }
   if (genre) {
@@ -76,23 +84,26 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
         // 가수 Ado가 Nelly Furtado보다 위에 온다. 그 안에서 선택한 정렬 적용.
         ...(q
           ? (() => {
-              const exact = q.toLowerCase();
-              const prefix = `${exact}%`;
+              // 순위 비교도 검색과 같은 공백-무시 정규화를 쓴다 — 다르면
+              // "hump back" 검색에서 정확 일치인 Hump Back이 위로 못 올라온다
+              const nt = sql`replace(lower(${schema.songs.title}), ' ', '')`;
+              const na = sql`replace(lower(${schema.songs.artist}), ' ', '')`;
+              const prefix = `${norm}%`;
               if (field === "artist") {
                 return [
-                  sql`(lower(${schema.songs.artist}) = ${exact}) DESC`,
-                  sql`(lower(${schema.songs.artist}) LIKE ${prefix}) DESC`,
+                  sql`(${na} = ${norm}) DESC`,
+                  sql`(${na} LIKE ${prefix}) DESC`,
                 ];
               }
               if (field === "title") {
                 return [
-                  sql`(lower(${schema.songs.title}) = ${exact}) DESC`,
-                  sql`(lower(${schema.songs.title}) LIKE ${prefix}) DESC`,
+                  sql`(${nt} = ${norm}) DESC`,
+                  sql`(${nt} LIKE ${prefix}) DESC`,
                 ];
               }
               return [
-                sql`(lower(${schema.songs.title}) = ${exact} OR lower(${schema.songs.artist}) = ${exact}) DESC`,
-                sql`(lower(${schema.songs.title}) LIKE ${prefix} OR lower(${schema.songs.artist}) LIKE ${prefix}) DESC`,
+                sql`(${nt} = ${norm} OR ${na} = ${norm}) DESC`,
+                sql`(${nt} LIKE ${prefix} OR ${na} LIKE ${prefix}) DESC`,
               ];
             })()
           : []),
@@ -204,6 +215,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
                 </span>
               </Link>
               <AddToPlaylistButton songId={song.id} />
+              <LikeButton songId={song.id} />
             </li>
           ))}
           {rows.length === 0 && (
@@ -225,23 +237,41 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
             )}
             <ul className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-dashed border-white/15 bg-white/[0.02]">
               {external.map((ext) => (
-                <li key={ext.itunesId} className="flex items-center gap-4 px-4 py-3">
-                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/5">
-                    {ext.artworkUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지
-                      <img src={ext.artworkUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+                <li key={ext.itunesId} className="flex items-center gap-4 px-4 py-3 transition hover:bg-white/5">
+                  {/* 은하에 편입된 곡(방금 추가)은 위 목록 행처럼 행 자체가 상세로 가는
+                      링크다. 아직 편입 전이면 상세 페이지가 없으므로 링크를 걸지 않는다 */}
+                  {(() => {
+                    const rowBody = (
+                      <>
+                        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/5">
+                          {ext.artworkUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지
+                            <img src={ext.artworkUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+                          ) : (
+                            <div className="grid h-full w-full place-items-center text-white/20">✦</div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{ext.title}</p>
+                          <p className="truncate text-xs text-white/50">
+                            {ext.artist}
+                            {ext.releaseYear && <span className="ml-1.5 text-white/30">· {ext.releaseYear}</span>}
+                            {ext.genre && <span className="ml-1.5 text-white/30">· {ext.genre}</span>}
+                          </p>
+                        </div>
+                      </>
+                    );
+                    return ext.existingSongId ? (
+                      <Link
+                        href={`/songs/${ext.existingSongId}`}
+                        className="flex min-w-0 flex-1 items-center gap-4"
+                      >
+                        {rowBody}
+                      </Link>
                     ) : (
-                      <div className="grid h-full w-full place-items-center text-white/20">✦</div>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{ext.title}</p>
-                    <p className="truncate text-xs text-white/50">
-                      {ext.artist}
-                      {ext.releaseYear && <span className="ml-1.5 text-white/30">· {ext.releaseYear}</span>}
-                      {ext.genre && <span className="ml-1.5 text-white/30">· {ext.genre}</span>}
-                    </p>
-                  </div>
+                      <div className="flex min-w-0 flex-1 items-center gap-4">{rowBody}</div>
+                    );
+                  })()}
                   {ext.existingSongId ? (
                     /* 필터 덕에 여기 오는 건 방금 추가한 곡뿐 — 한 번 더 누르면 상세로 */
                     <Link

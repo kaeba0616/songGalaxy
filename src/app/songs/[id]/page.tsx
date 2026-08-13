@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getSessionUser } from "@/auth";
 import BackToGalaxyLink from "@/components/BackToGalaxyLink";
@@ -40,7 +40,7 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
     : [undefined];
 
   const user = await getSessionUser();
-  const [media, artist, lyrics, videoId, [likeCount], myLike] = await Promise.all([
+  const [media, artist, lyrics, videoId, [likeCount]] = await Promise.all([
     enrichSongs([songId]).then((m) => m[songId]),
     getArtistInfo(song.artist, song.genre),
     getLyrics(songId),
@@ -52,12 +52,6 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.likes)
       .where(eq(schema.likes.songId, songId)),
-    user
-      ? db
-          .select({ songId: schema.likes.songId })
-          .from(schema.likes)
-          .where(and(eq(schema.likes.userId, user.id), eq(schema.likes.songId, songId)))
-      : Promise.resolve([]),
   ]);
 
   const artistLine = [
@@ -102,12 +96,7 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
           <div className="min-w-0">
             <div className="flex items-center gap-3">
               <h1 className="truncate text-2xl font-semibold">{song.title}</h1>
-              <LikeButton
-                songId={song.id}
-                initialLiked={myLike.length > 0}
-                authenticated={user != null}
-                size="lg"
-              />
+              <LikeButton songId={song.id} size="lg" />
               {likeCount.n > 0 && (
                 <span className="shrink-0 text-sm text-pink-200/70">{likeCount.n}명이 좋아요</span>
               )}

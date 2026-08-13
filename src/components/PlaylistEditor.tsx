@@ -16,6 +16,7 @@
  * 순서 계산은 하지 않는다 — `src/lib/reorder.ts`가 원본이다 (docs/SSOT.md).
  */
 import Link from "next/link";
+import LikeButton from "@/components/LikeButton";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import PlaylistPlayButton from "@/components/PlaylistPlayButton";
@@ -235,6 +236,7 @@ export default function PlaylistEditor({
                 미리듣기
               </span>
             )}
+            <LikeButton songId={s.id} />
             <button
               type="button"
               onClick={() => void remove(s.id)}
