@@ -186,7 +186,13 @@ export default function GalaxyCanvas({
   const [flash, setFlash] = useState(false);
   /** 자동 라디오가 브라우저 정책에 막혔을 때 폴백 버튼 표시 */
   const [radioBlocked, setRadioBlocked] = useState(false);
-  const autoRadioTried = useRef(false);
+  /**
+   * 자동 라디오를 이미 시도한 행성의 userId. 불리언이면 행성→행성 이동에서 라디오가
+   * 안 켜진다 — exitSky의 setSkyInfo(null)과 다음 착륙의 세팅이 한 클릭 핸들러에서
+   * 일어나 React가 묶으므로, null을 관측하고 리셋할 틈이 없다. "어느 행성에서
+   * 시도했는가"로 들고 있으면 관측 순서와 무관하게 새 행성에서 다시 시도한다.
+   */
+  const autoRadioTriedFor = useRef<number | null>(null);
   // 재생·볼륨·미디어 캐시의 단일 원본 (SSOT: src/player/player-context.tsx).
   // 캔버스가 언마운트돼도 재생이 이어지도록 오디오는 이 프로바이더가 소유한다.
   const {
@@ -421,12 +427,12 @@ export default function GalaxyCanvas({
 
   useEffect(() => {
     if (skyInfo && cards) {
-      if (!autoRadioTried.current) {
-        autoRadioTried.current = true;
+      if (autoRadioTriedFor.current !== skyInfo.userId) {
+        autoRadioTriedFor.current = skyInfo.userId;
         void tryRadio(cards);
       }
     } else if (!skyInfo) {
-      autoRadioTried.current = false;
+      autoRadioTriedFor.current = null;
       setRadioBlocked(false);
     }
   }, [skyInfo, cards, tryRadio]);
@@ -1475,8 +1481,10 @@ export default function GalaxyCanvas({
     };
     const landOnStar = (entry: StarEntry) => {
       if (skyActive || pendingSky) return;
-      // 은하에서 듣던 곡을 기억 — 착륙하면 행성 라디오로 바뀌고, 나올 때 여기서 이어 듣는다
-      galaxySnapshot.current = playerApiRef.current.snapshot();
+      // 은하에서 듣던 곡을 기억 — 착륙하면 행성 라디오로 바뀌고, 나올 때 여기서 이어 듣는다.
+      // 행성→행성 이동이면 이미 보존된 은하 스냅샷이 있다 — 지금 플레이어는 행성
+      // 라디오라, 여기서 덮어쓰면 은하로 나갈 때 은하 음악 대신 옛 라디오가 살아난다
+      if (!galaxySnapshot.current) galaxySnapshot.current = playerApiRef.current.snapshot();
       pendingSky = { entry, songIds: null, decor: [] };
       showCards(null);
       setSkyInfo({ userId: entry.data.userId, nickname: entry.data.nickname });
@@ -1541,7 +1549,13 @@ export default function GalaxyCanvas({
     };
 
     /** 밤하늘에서 은하로 복귀 */
-    const exitSky = () => {
+    /**
+     * @param keepPlayer 행성→행성 이동·테마 재착륙처럼 **곧바로 다시 착륙할 때** true.
+     * 기본 동작(은하 음악 복원)을 그대로 두면 이동하는 2초 동안 은하 노래가
+     * 끼어들었다가 새 라디오로 바뀐다 — 걷다가 남의 별로 건너갈 뿐인데 음악이
+     * 세 번 바뀐다. true면 플레이어를 건드리지 않아 라디오가 끊기지 않는다.
+     */
+    const exitSky = (keepPlayer = false) => {
       // 방향키/조이스틱을 누른 채로 나가면 keyup·pointerup이 갈 곳이 없어져
       // 굳는다 — 나가는 모든 경로가 여길 지나가므로 조기 return보다 앞에 둔다
       walkKeys.forward = walkKeys.back = walkKeys.left = walkKeys.right = false;
@@ -1588,30 +1602,34 @@ export default function GalaxyCanvas({
       controls.minPolarAngle = 0;
       controls.maxPolarAngle = Math.PI;
       setSkyInfo(null);
-      // 행성 라디오를 끄고, 착륙 전 은하에서 듣던 곡을 그 위치부터 이어 재생.
-      // 듣던 목록은 카드 캐러셀로 되살려 그대로 이어 들을 수 있게 한다
-      const snap = galaxySnapshot.current;
-      galaxySnapshot.current = null;
-      if (snap) {
-        void playerApiRef.current.restore(snap);
-        // 목록 재생은 카드로 옮기지 않는다 — 캐러셀은 성단을 훑는 자리이지
-        // 내 노래 목록의 자리가 아니다 (위 복원 이펙트와 같은 이유)
-        const q = snap.queue;
-        showCards(q && q.mode !== "playlist" ? toCardsRef.current(q) : null);
-      } else {
-        playerApiRef.current.stop();
-        showCards(null);
+      if (!keepPlayer) {
+        // 행성 라디오를 끄고, 착륙 전 은하에서 듣던 곡을 그 위치부터 이어 재생.
+        // 듣던 목록은 카드 캐러셀로 되살려 그대로 이어 들을 수 있게 한다
+        const snap = galaxySnapshot.current;
+        galaxySnapshot.current = null;
+        if (snap) {
+          void playerApiRef.current.restore(snap);
+          // 목록 재생은 카드로 옮기지 않는다 — 캐러셀은 성단을 훑는 자리이지
+          // 내 노래 목록의 자리가 아니다 (위 복원 이펙트와 같은 이유)
+          const q = snap.queue;
+          showCards(q && q.mode !== "playlist" ? toCardsRef.current(q) : null);
+        } else {
+          playerApiRef.current.stop();
+          showCards(null);
+        }
+        flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
       }
-      flyTo(new THREE.Vector3(0, 0, 0), OVERVIEW_DISTANCE);
     };
     exitSkyRef.current = exitSky;
     landByUserRef.current = (uid: number) => {
       const target = userStars.find((s) => s.data.userId === uid);
       if (!target) return;
       if (skyActive) {
-        // 행성→행성 이동: 은하 스냅샷은 그대로 두고 정리만 한다
+        // 행성→행성 이동: 은하 스냅샷은 그대로 두고 정리만 한다.
+        // keepPlayer — 이동하는 동안 지금 라디오가 계속 나오고, 착륙하면
+        // (다른 행성이면) 새 라디오로 바뀐다. 은하 음악이 끼어들지 않는다
         const keep = galaxySnapshot.current;
-        exitSky();
+        exitSky(true);
         galaxySnapshot.current = keep;
       }
       landOnStar(target);
