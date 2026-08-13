@@ -660,26 +660,6 @@ export default function GalaxyCanvas({
     if (s) flyToPosRef.current?.(s.x, s.y, s.z, 120);
   }, [skyInfo, authState.userId, authState.star]);
 
-  /** 이 행성의 밤하늘(주인이 좋아요한 곡들)을 내 노래 목록으로 가져온다 */
-  const importSky = useCallback(async (fromUserId: number) => {
-    try {
-      const res = await fetch("/api/playlists/import-sky", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromUserId }),
-      });
-      const data = (await res.json()) as { name?: string; count?: number; error?: string };
-      setToast(
-        res.ok
-          ? `⤵ "${data.name}" 목록으로 ${data.count}곡을 가져왔어요`
-          : `⚠ ${data.error ?? "가져오지 못했어요"}`,
-      );
-    } catch {
-      setToast("⚠ 가져오지 못했어요. 잠시 후 다시 시도해주세요");
-    }
-    setTimeout(() => setToast(null), 4000);
-  }, []);
-
   /** 행성 링크 복사 */
   const copyPlanetLink = useCallback(() => {
     if (!skyInfo) return;
@@ -2454,18 +2434,16 @@ export default function GalaxyCanvas({
                 >
                   🔗 행성 링크 복사
                 </button>
-                {/* 남의 행성에서만 — 내 밤하늘을 내 목록으로 또 뜨는 건 의미가 없다 */}
-                {authState.authenticated && skyInfo.userId !== authState.userId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      void importSky(skyInfo.userId);
-                    }}
+                {/* 남의 행성에서만 — 내 밤하늘 목록은 /me가 이미 그 자리다.
+                    가져오기 버튼은 이 보기 페이지 안에 있다 (보기와 가져오기 분리) */}
+                {skyInfo.userId !== authState.userId && (
+                  <Link
+                    href={`/planet/${skyInfo.userId}/list`}
+                    onClick={() => setMenuOpen(false)}
                     className={MENU_ITEM}
                   >
-                    ⤵ 이 행성 플리 가져오기
-                  </button>
+                    ≡ 이 행성 플리 보기
+                  </Link>
                 )}
                 <button
                   type="button"
