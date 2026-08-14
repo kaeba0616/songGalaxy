@@ -125,8 +125,11 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
 
   // 검색어가 있으면 은하 밖(iTunes)에서도 후보를 찾는다 — 신인·최신곡 즉석 편입 경로
   // 이미 은하에 있는 곡은 목록에서 뺀다 (방금 추가한 곡만 "추가했어요" 표시용으로 남김)
+  // 편입된 곡은 예외 없이 걸러낸다 — 예전엔 방금 추가한 곡을 "추가했어요 →"로
+  // 남겼는데, 같은 곡이 위 정식 목록에도 떠서 중복으로 보였다. 피드백은 위
+  // 목록의 그 행을 강조하는 것으로 준다 (아래 added 강조)
   const external = (q && page === 1 ? await searchExternal(q) : []).filter(
-    (ext) => !ext.existingSongId || String(ext.existingSongId) === params.added,
+    (ext) => !ext.existingSongId,
   );
 
   /**
@@ -193,7 +196,16 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
             링크 안에 버튼을 넣으면 버튼을 눌러도 곡 상세로 같이 이동한다 */}
         <ul className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
           {rows.map((song) => (
-            <li key={song.id} className="flex items-center gap-3 px-4 py-3 transition hover:bg-white/5">
+            <li
+              key={song.id}
+              /* 방금 은하에 추가한 곡 — 편입 직후 여기로 스크롤(#added)되고 테두리로 강조된다 */
+              id={String(song.id) === params.added ? "added" : undefined}
+              className={`flex items-center gap-3 px-4 py-3 transition hover:bg-white/5 ${
+                String(song.id) === params.added
+                  ? "added-pop border-l-2 border-amber-200/70 bg-amber-100/10"
+                  : ""
+              }`}
+            >
               <Link
                 href={`/songs/${song.id}`}
                 className="flex min-w-0 flex-1 items-center gap-4"
@@ -261,37 +273,20 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
                         </div>
                       </>
                     );
-                    return ext.existingSongId ? (
-                      <Link
-                        href={`/songs/${ext.existingSongId}`}
-                        className="flex min-w-0 flex-1 items-center gap-4"
-                      >
-                        {rowBody}
-                      </Link>
-                    ) : (
-                      <div className="flex min-w-0 flex-1 items-center gap-4">{rowBody}</div>
-                    );
+                    // 편입된 곡은 이 섹션에 오지 않는다(위 필터) — 편입 전 곡은
+                    // 상세 페이지가 아직 없으므로 링크를 걸지 않는다
+                    return <div className="flex min-w-0 flex-1 items-center gap-4">{rowBody}</div>;
                   })()}
-                  {ext.existingSongId ? (
-                    /* 필터 덕에 여기 오는 건 방금 추가한 곡뿐 — 한 번 더 누르면 상세로 */
-                    <Link
-                      href={`/songs/${ext.existingSongId}`}
-                      className="added-pop shrink-0 rounded-full border border-amber-200/50 bg-amber-100/15 px-3.5 py-1.5 text-xs text-amber-100 transition hover:bg-amber-100/25"
-                    >
-                      ✓ 추가했어요 →
-                    </Link>
-                  ) : (
-                    <form action={importSongAction}>
-                      <input type="hidden" name="itunesId" value={ext.itunesId} />
-                      {/* 현재 검색 상태 유지용 — 추가 후 같은 화면으로 복귀 */}
-                      <input type="hidden" name="q" value={q} />
-                      <input type="hidden" name="field" value={field} />
-                      <input type="hidden" name="cluster" value={cluster?.slug ?? ""} />
-                      <input type="hidden" name="genre" value={genre ?? ""} />
-                      <input type="hidden" name="sort" value={sort} />
-                      <ImportButton />
-                    </form>
-                  )}
+                  <form action={importSongAction}>
+                    <input type="hidden" name="itunesId" value={ext.itunesId} />
+                    {/* 현재 검색 상태 유지용 — 추가 후 같은 화면으로 복귀 */}
+                    <input type="hidden" name="q" value={q} />
+                    <input type="hidden" name="field" value={field} />
+                    <input type="hidden" name="cluster" value={cluster?.slug ?? ""} />
+                    <input type="hidden" name="genre" value={genre ?? ""} />
+                    <input type="hidden" name="sort" value={sort} />
+                    <ImportButton />
+                  </form>
                 </li>
               ))}
             </ul>

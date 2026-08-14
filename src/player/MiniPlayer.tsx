@@ -84,6 +84,8 @@ export default function MiniPlayer() {
   const [dragging, setDragging] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  /** 담기 성공 직후 + 버튼을 잠깐 ✓로 — "«이름»에 담았어요" 문구 대신 */
+  const [addFlash, setAddFlash] = useState(false);
   /** 목록을 위로 펼칠지 아래로 펼칠지 — 화면에서 바가 놓인 높이로 결정 */
   const [openUp, setOpenUp] = useState(true);
   /** 포인터와 바 좌상단의 간격 — 드래그 중 바가 튀지 않게 */
@@ -209,7 +211,14 @@ export default function MiniPlayer() {
       )}
 
       {addOpen && playingId !== null && (
-        <AddToPlaylist songId={playingId} onClose={() => setAddOpen(false)} />
+        <AddToPlaylist
+          songId={playingId}
+          onClose={() => setAddOpen(false)}
+          onAdded={() => {
+            setAddFlash(true);
+            setTimeout(() => setAddFlash(false), 1200);
+          }}
+        />
       )}
 
       {/* 재생 방식이 바뀐 이유 한 줄 — 영상이 계속 실패해 미리듣기로 내려온 경우 */}
@@ -268,12 +277,16 @@ export default function MiniPlayer() {
               setExpanded(false); // 재생 목록과 겹치지 않게
               setAddOpen((v) => !v);
             }}
-            className="grid h-8 w-8 cursor-pointer place-items-center rounded-full border border-white/20 bg-white/10 text-sm text-white/70 transition hover:bg-white/20"
+            className={`grid h-8 w-8 cursor-pointer place-items-center rounded-full border text-sm transition ${
+              addFlash
+                ? "added-pop border-amber-200/60 bg-amber-100/15 text-amber-100"
+                : "border-white/20 bg-white/10 text-white/70 hover:bg-white/20"
+            }`}
             aria-label="목록에 담기"
             aria-expanded={addOpen}
             title="목록에 담기"
           >
-            +
+            {addFlash ? "✓" : "+"}
           </button>
           <button
             type="button"

@@ -28,6 +28,8 @@ export default function AddToPlaylistButton({
   buttonClassName?: string;
 }) {
   const [anchor, setAnchor] = useState<{ up: boolean; top: number; bottom: number; right: number } | null>(null);
+  /** 담기 성공 직후 잠깐 ✓ — 문구 대신 버튼 자체가 피드백이 된다 */
+  const [flash, setFlash] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -86,9 +88,9 @@ export default function AddToPlaylistButton({
         aria-label="노래 목록에 담기"
         aria-expanded={anchor !== null}
         title="노래 목록에 담기"
-        className={buttonClassName}
+        className={`${buttonClassName} ${flash ? "added-pop border-amber-200/60 text-amber-100" : ""}`}
       >
-        +
+        {flash ? "✓" : "+"}
       </button>
       {anchor &&
         /* 포털로 body에 직접 그린다 — 카드처럼 backdrop-filter가 있는 조상 밑에서는
@@ -99,6 +101,10 @@ export default function AddToPlaylistButton({
             <AddToPlaylist
               songId={songId}
               onClose={() => setAnchor(null)}
+              onAdded={() => {
+                setFlash(true);
+                setTimeout(() => setFlash(false), 1200);
+              }}
               panelClassName="fixed z-50 w-64 rounded-2xl border border-white/15 bg-black/90 p-3 text-sm text-white shadow-xl backdrop-blur"
               panelStyle={
                 anchor.up

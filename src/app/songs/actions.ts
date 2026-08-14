@@ -16,7 +16,7 @@ export async function importSongAction(formData: FormData): Promise<void> {
   } catch {
     // 외부 API 실패 — 아래에서 importError로 안내
   }
-  // 현재 검색 상태를 유지한 채 복귀 (+ 방금 추가한 곡 표시, 외부 검색 섹션으로 스크롤)
+  // 현재 검색 상태를 유지한 채 복귀 — 방금 추가한 곡이 정식 목록에서 강조된다(#added)
   const sp = new URLSearchParams();
   for (const key of ["q", "field", "cluster", "genre", "sort", "page"] as const) {
     const value = formData.get(key);
@@ -27,5 +27,5 @@ export async function importSongAction(formData: FormData): Promise<void> {
   // replace — 편입은 같은 검색 화면의 상태 갱신이지 새 목적지가 아니다.
   // push(기본값)면 "은하에 추가"를 누른 횟수만큼 히스토리가 쌓여, 겹쳐 띄운
   // 화면의 ✕(뒤로 한 칸)를 그만큼 눌러야 은하로 나온다 (페이지네이션과 같은 병)
-  redirect(`/songs?${sp.toString()}#external`, RedirectType.replace);
+  redirect(`/songs?${sp.toString()}#added`, RedirectType.replace);
 }

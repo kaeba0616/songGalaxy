@@ -33,6 +33,9 @@ export default function VideoStage() {
     reportYoutubeError,
     toggle,
     playStep,
+    volume,
+    changeVolume,
+    toggleMute,
   } = usePlayer();
   const wrapRef = useRef<HTMLDivElement>(null);
   /**
@@ -141,6 +144,29 @@ export default function VideoStage() {
         >
           영상 접기 (재생이 멈춥니다)
         </button>
+        {/* 볼륨 — 목록 재생 중 알약은 숨으므로(레일이 컨트롤 전담) 볼륨도 여기 있어야 한다.
+            없으면 데스크톱에서 플리 볼륨을 조절할 길이 사라진다 */}
+        <div className="flex items-center gap-2 border-t border-white/10 px-3 py-2">
+          <button
+            type="button"
+            onClick={toggleMute}
+            className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-full text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
+            aria-label={volume > 0 ? "음소거" : "음소거 해제"}
+            title={volume > 0 ? "음소거" : "음소거 해제"}
+          >
+            {volume === 0 ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            onChange={(e) => changeVolume(Number(e.target.value))}
+            className="h-1 w-full cursor-pointer accent-amber-200"
+            aria-label="볼륨"
+          />
+        </div>
       </div>
 
       {engine === "youtube" && !videoExpanded && (

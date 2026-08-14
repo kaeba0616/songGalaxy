@@ -23,11 +23,17 @@ export default function AddToPlaylist({
   onClose,
   panelClassName = PANEL_ABOVE_FULL,
   panelStyle,
+  onAdded,
 }: {
   songId: number;
   onClose: () => void;
   /** 붙는 자리는 부르는 쪽이 정한다 — 알약과 목록 행은 폭도 방향도 다르다 */
   panelClassName?: string;
+  /**
+   * 담기 성공(이미 있음 포함) 알림 — 넘기면 "«이름»에 담았어요" 문구 대신
+   * 팝오버를 바로 닫고 부모가 + 버튼을 ✓로 잠깐 바꾸는 식으로 피드백한다
+   */
+  onAdded?: () => void;
   /** fixed 배치용 좌표 — AddToPlaylistButton이 조상 overflow 클리핑을 피해 쓴다 */
   panelStyle?: React.CSSProperties;
 }) {
@@ -93,6 +99,12 @@ export default function AddToPlaylist({
       if (!r.ok || !j.ok) {
         setError(j.error ?? "담지 못했어요");
         setBusyBoth(false);
+        return;
+      }
+      if (onAdded) {
+        // 피드백은 부모의 + 버튼(✓ 플래시)이 맡는다 — 문구 없이 바로 닫는다
+        onAdded();
+        onClose();
         return;
       }
       setDone(j.already ? `이미 «${label}»에 있어요` : `«${label}»에 담았어요`);
