@@ -36,6 +36,7 @@ export default function VideoStage() {
     volume,
     changeVolume,
     toggleMute,
+    isPaused,
   } = usePlayer();
   const wrapRef = useRef<HTMLDivElement>(null);
   /**
@@ -44,10 +45,13 @@ export default function VideoStage() {
    *
    * **접으면 재생도 멈춘다 (YouTube 약관).** 플레이어를 숨긴 채 소리만 내는 것은
    * 오디오만 분리한 경험이라 API 정책 위반이다 — "영상 접기 (재생이 멈춥니다)"가
-   * 멈추는 것과 같은 이유. 접기는 setVideoExpanded(false)를 함께 태워 일시정지하고,
-   * 펴면 기존 "영상 펼치고 이어 듣기" 흐름으로 이어 듣는다.
+   * 멈추는 것과 같은 이유. 접기는 setVideoExpanded(false)를 함께 태워 일시정지한다.
+   *
+   * **펴면 영상도 되살린다** — 단 접기가 멈춘 경우에만(resumeOnExpand). 접기 전에
+   * 이미 스스로 일시정지해 뒀다면 펼친다고 갑자기 재생되면 놀란다.
    */
   const [railHidden, setRailHidden] = useState(false);
+  const resumeOnExpand = useRef(false);
 
   /**
    * 레일/카드가 차지하는 크기를 CSS 변수로 알린다 — `globals.css`의 `main` 규칙이
@@ -111,8 +115,17 @@ export default function VideoStage() {
         type="button"
         onClick={() => {
           setRailHidden((v) => {
-            // 접는 순간 재생도 멈춘다 — 숨긴 플레이어로 소리만 내면 약관 위반
-            if (!v) setVideoExpanded(false);
+            if (!v) {
+              // 접는 순간 재생도 멈춘다 — 숨긴 플레이어로 소리만 내면 약관 위반.
+              // 이때 재생 중이었는지를 기억해 두면, 펼 때 그 상태로 돌려놓을 수 있다
+              resumeOnExpand.current = engine === "youtube" && !isPaused;
+              setVideoExpanded(false);
+            } else if (resumeOnExpand.current) {
+              // 접기가 멈춘 재생을 되살린다 — toggle이 "펼침과 재생은 짝" 규칙대로
+              // 영상을 다시 펼치면서 이어 재생한다 (탭 클릭 = 사용자 제스처라 자동재생 정책도 통과)
+              resumeOnExpand.current = false;
+              void toggle();
+            }
             return !v;
           });
         }}
