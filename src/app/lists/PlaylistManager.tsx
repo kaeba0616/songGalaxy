@@ -162,7 +162,9 @@ export default function PlaylistManager({ initial }: { initial: PlaylistSummary[
       <ul className="mt-3 divide-y divide-white/10 rounded-2xl border border-white/10 bg-white/5">
         {items.map((p) => (
           <li key={p.id} className="flex items-center gap-3 px-4 py-3">
-            <Link href={`/lists/${p.id}`} className="min-w-0 flex-1">
+            {/* replace — 오버레이 안 옆이동은 히스토리를 쌓지 않는다. 쌓으면 ✕(뒤로
+                한 칸)를 이동한 횟수만큼 눌러야 은하로 나온다 (페이지네이션과 같은 병) */}
+            <Link replace href={`/lists/${p.id}`} className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{p.name}</span>
               <span className="block text-xs text-white/40">{p.songCount}곡</span>
             </Link>

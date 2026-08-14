@@ -790,6 +790,10 @@ export default function GalaxyCanvas({
     };
     resize();
     window.addEventListener("resize", resize);
+    // 레일이 열리고 닫힐 때 컨테이너 폭이 변한다(--video-rail-w) — window.resize가
+    // 안 오므로 컨테이너를 직접 관찰해야 은하가 남은 폭의 중앙으로 다시 잡힌다
+    const containerRo = new ResizeObserver(resize);
+    containerRo.observe(container);
 
     // 원경 배경 별 (장식용, 데이터와 무관) — 각자 위상이 다른 반짝임 (#8 미학)
     let bgStarsMat: THREE.ShaderMaterial | null = null;
@@ -2220,6 +2224,7 @@ export default function GalaxyCanvas({
       disposed = true;
       cancelAnimationFrame(frameId);
       window.removeEventListener("resize", resize);
+      containerRo.disconnect();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
@@ -2260,7 +2265,13 @@ export default function GalaxyCanvas({
 
   return (
     <div className="relative h-dvh w-full overflow-hidden" style={{ background: GALAXY_BG }}>
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* 레일이 서면 그 폭만큼 좁아진다 — 은하의 카메라 중앙이 "보이는 영역"의
+          중앙과 일치해야 검색창·성단이 낀 느낌 없이 정렬된다. 크기 변화는 아래
+          ResizeObserver가 받아 렌더러를 다시 잰다 (window.resize만으로는 못 받는다) */}
+      <div
+        ref={containerRef}
+        className="absolute inset-y-0 left-0 right-[var(--video-rail-w,0px)] transition-[right] duration-300"
+      />
       <div
         ref={labelLayerRef}
         className="pointer-events-none absolute inset-0"
@@ -2644,7 +2655,7 @@ export default function GalaxyCanvas({
         <button
           type="button"
           onClick={() => void tryRadio()}
-          className="absolute left-1/2 top-24 z-10 -translate-x-1/2 rounded-full border border-white/25 bg-black/60 px-5 py-2 text-sm text-white backdrop-blur transition hover:bg-black/80"
+          className="absolute left-[calc((100%-var(--video-rail-w,0px))/2)] top-24 z-10 -translate-x-1/2 rounded-full border border-white/25 bg-black/60 px-5 py-2 text-sm text-white backdrop-blur transition hover:bg-black/80"
         >
           ▶ 라디오 시작
         </button>
@@ -2652,7 +2663,7 @@ export default function GalaxyCanvas({
 
       {/* 별 탄생 등 알림 토스트 */}
       {toast && (
-        <div className="galaxy-pulse-once absolute left-1/2 top-20 z-10 -translate-x-1/2 rounded-full border border-amber-200/40 bg-black/75 px-6 py-3 text-amber-100 backdrop-blur">
+        <div className="galaxy-pulse-once absolute left-[calc((100%-var(--video-rail-w,0px))/2)] top-20 z-10 -translate-x-1/2 rounded-full border border-amber-200/40 bg-black/75 px-6 py-3 text-amber-100 backdrop-blur">
           {toast}
         </div>
       )}
@@ -2695,7 +2706,7 @@ export default function GalaxyCanvas({
         <button
           type="button"
           onClick={() => exitSkyRef.current?.()}
-          className="absolute bottom-[calc(1rem+var(--sky-cards-h,0px))] left-1/2 z-10 -translate-x-1/2 cursor-pointer rounded-full border border-white/15 bg-black/40 px-4 py-1.5 text-sm text-white/60 backdrop-blur transition hover:bg-black/60 hover:text-white"
+          className="absolute bottom-[calc(1rem+var(--sky-cards-h,0px))] left-[calc((100%-var(--video-rail-w,0px))/2)] z-10 -translate-x-1/2 cursor-pointer rounded-full border border-white/15 bg-black/40 px-4 py-1.5 text-sm text-white/60 backdrop-blur transition hover:bg-black/60 hover:text-white"
         >
           ✦ 은하로 나가기
         </button>
@@ -2709,7 +2720,7 @@ export default function GalaxyCanvas({
             e.preventDefault();
             void runSearch();
           }}
-          className="absolute bottom-[calc(1rem+var(--sky-cards-h,0px))] left-1/2 z-10 flex w-[min(88vw,22rem)] -translate-x-1/2 items-center gap-1.5 rounded-full border border-white/15 bg-black/50 py-1.5 pl-4 pr-1.5 backdrop-blur transition focus-within:border-white/35"
+          className="absolute bottom-[calc(1rem+var(--sky-cards-h,0px))] left-[calc((100%-var(--video-rail-w,0px))/2)] z-10 flex w-[min(88vw,22rem)] -translate-x-1/2 items-center gap-1.5 rounded-full border border-white/15 bg-black/50 py-1.5 pl-4 pr-1.5 backdrop-blur transition focus-within:border-white/35"
         >
           <input
             type="text"

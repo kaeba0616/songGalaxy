@@ -39,7 +39,9 @@ export default async function PlaylistDetailPage(props: {
             나가는 길이 "← 내 목록"을 거치는 두 번 클릭뿐이었다. BackToGalaxyLink는
             오버레이 안에서는 스스로 아무것도 그리지 않으므로 출구가 둘로 보이지 않는다 */}
         <div className="flex items-center justify-between gap-4">
-          <Link href="/lists" className="text-sm text-white/50 transition hover:text-white">
+          {/* replace — "돌아가기"가 히스토리를 쌓으면 ✕(뒤로 한 칸)가 은하 대신
+              방금 떠난 상세로 되돌아간다. 오버레이 안 이동은 전부 replace */}
+          <Link replace href="/lists" className="text-sm text-white/50 transition hover:text-white">
             ← 내 목록
           </Link>
           <BackToGalaxyLink className="text-sm text-white/50 transition hover:text-white" />
