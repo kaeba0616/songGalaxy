@@ -543,6 +543,51 @@ export default function GalaxyCanvas({
     [setUiHosted],
   );
 
+  /**
+   * 은하 하단 검색창 — 결과를 하단 캐러셀에 싣는다 (곡 하나여도 여러 개여도 같은 자리).
+   * 매칭 규칙은 곡 목록 페이지와 같은 공용 모듈(/api/search → server/song-search.ts).
+   * 깊은 탐색(필터·페이지·은하 밖 편입)은 여전히 곡 목록 페이지가 맡는다.
+   */
+  const [searchQ, setSearchQ] = useState("");
+  const searchSeq = useRef(0);
+  /** 은하 페이로드 미러 — 씬 이펙트가 채우고, 검색 결과에 별 인덱스를 붙일 때 읽는다 */
+  const payloadRef = useRef<GalaxyPayload | null>(null);
+  const runSearch = useCallback(async () => {
+    const q = searchQ.trim();
+    if (!q) return;
+    const seq = ++searchSeq.current;
+    try {
+      const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const d = (await r.json()) as {
+        songs: { id: number; title: string; artist: string; popularity: number }[];
+      };
+      if (seq !== searchSeq.current) return; // 더 최근 검색이 이미 나감
+      if (d.songs.length === 0) {
+        setToast(`«${q}» 검색 결과가 없어요`);
+        setTimeout(() => setToast(null), 2500);
+        return;
+      }
+      // 은하 페이로드 인덱스를 붙인다 — 카드의 별 관련 동작이 그대로 살아난다.
+      // 페이로드에 없는 곡(-1)이어도 카드 자체(상세 링크·♥·담기)는 동작한다
+      showCards({
+        title: `«${q}» 검색 결과`,
+        subtitle: `${d.songs.length}곡`,
+        color: "#ffdf9e",
+        songs: d.songs.map((sng) => ({
+          index: payloadRef.current?.songs.id.indexOf(sng.id) ?? -1,
+          id: sng.id,
+          title: sng.title,
+          artist: sng.artist,
+          popularity: sng.popularity,
+        })),
+      });
+    } catch {
+      if (seq !== searchSeq.current) return;
+      setToast("검색하지 못했어요. 잠시 후 다시 시도해주세요");
+      setTimeout(() => setToast(null), 2500);
+    }
+  }, [searchQ, showCards]);
+
   // 위 showCards를 놓친 경로가 있어도 상태가 어긋나지 않도록 하는 보정 +
   // 은하 화면을 떠날 때 알약을 다시 띄우기 위한 정리
   useEffect(() => {
@@ -1885,6 +1930,7 @@ export default function GalaxyCanvas({
       .then((data) => {
         if (disposed) return;
         payload = data;
+        payloadRef.current = data;
         const n = data.songs.id.length;
         positions = new Float32Array(data.songs.pos);
         songIndexById = new Map(data.songs.id.map((id, i) => [id, i]));
@@ -2653,6 +2699,34 @@ export default function GalaxyCanvas({
         >
           ✦ 은하로 나가기
         </button>
+      )}
+
+      {/* 은하 하단 검색창 — 결과는 하단 캐러셀로 (행성에서는 같은 자리를
+          "은하로 나가기"가 쓰므로 은하에서만). 캐러셀이 열리면 그 위로 비킨다 */}
+      {!skyInfo && status === "ready" && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void runSearch();
+          }}
+          className="absolute bottom-[calc(1rem+var(--sky-cards-h,0px))] left-1/2 z-10 flex w-[min(88vw,22rem)] -translate-x-1/2 items-center gap-1.5 rounded-full border border-white/15 bg-black/50 py-1.5 pl-4 pr-1.5 backdrop-blur transition focus-within:border-white/35"
+        >
+          <input
+            type="text"
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            placeholder="곡·가수 검색"
+            aria-label="곡·가수 검색"
+            className="w-full bg-transparent text-sm text-white placeholder-white/35 outline-none"
+          />
+          <button
+            type="submit"
+            aria-label="검색"
+            className="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-full bg-white/10 text-sm text-white/70 transition hover:bg-white/20 hover:text-white"
+          >
+            ⌕
+          </button>
+        </form>
       )}
 
       {status === "error" && (

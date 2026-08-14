@@ -26,6 +26,7 @@
 | 이웃 기반 좌표 수학 | `src/lib/neighbor-place.ts` | `place-song.ts`(곡 단위)·`fill-artist-catalog.ts`(대량) 공용 | 특징 z-score → 최근접 8곡 거리 가중 평균 → 경계 클램프. 두 경로가 같은 규칙을 써야 하므로 여기만 수정 |
 | 신규 곡 좌표 배치 | `src/server/place-song.ts` (`placeSong`) | 즉석 편입·주간 신곡·아티스트 확장이 공용 | ① 조회표에서 특징을 찾아 같은 장르 최근접 이웃 8곡의 좌표 중심 → ② 같은 가수 곡 근처 → ③ 장르 구역 랜덤 순으로 폴백. 성단/은하 경계 클램프 |
 | 오디오 특징 조회표 | `dataset_features` 테이블 (`scripts/ingest-features.ts`가 CSV에서 적재) | 신규 곡 배치의 특징 원천 | 데이터셋 고유 8.9만 곡 전체(은하 미적재분 포함). `data/`는 배포되지 않으므로 DB에 둔다. **스키마 변경 시 로컬·Neon 양쪽 적재 필요** |
+| 곡 검색 매칭 규칙 | `src/server/song-search.ts` | 곡 목록 페이지(`/songs`)의 검색 조건·순위, 은하 하단 검색창(`/api/search`) | **공백 무시 부분 일치**(질의·컬럼 모두 공백 제거 후 비교) + 정확>접두>인기 순위. 두 검색이 규칙을 따로 들면 "여기선 나오는데 저기선 안 나온다"가 된다 — 실제로 iTunes 외부 검색과 어긋나 "Humpback"으로 밴드 "Hump Back"을 못 찾던 일이 있었다 |
 | 곡 매칭 키 정규화 | `src/lib/match-key.ts` | 조회표 적재·조회가 공용 | 규칙을 바꾸면 `dataset_features`를 다시 적재해야 함 |
 | 오디오 특징 목록 | `src/config/constants.ts`의 `AUDIO_FEATURE_KEYS` | 적재·배치·이웃 찾기 | 순서까지 동일해야 함 |
 | 좌표 수학 유틸 | `src/lib/layout-math.ts` | 배치 스크립트·즉석 편입이 공용 | scripts/lib에서 이동 |

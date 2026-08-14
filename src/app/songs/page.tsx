@@ -8,6 +8,7 @@ import LikeButton from "@/components/LikeButton";
 import BackToGalaxyLink from "@/components/BackToGalaxyLink";
 import DataCredits from "@/components/DataCredits";
 import { searchExternal } from "@/server/import-song";
+import { normalizeSearch, spacelessCol, spacelessLike } from "@/server/song-search";
 import { importSongAction } from "./actions";
 import ImportButton from "./ImportButton";
 import SongFilters from "./SongFilters";
@@ -42,14 +43,10 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
   const page = Math.max(1, Number(params.page) || 1);
 
   const conditions: SQL[] = [];
-  /**
-   * 공백을 무시하는 부분 일치 — 외부 검색(iTunes)과 결과를 맞추기 위해서다.
-   * iTunes는 "Humpback"으로 밴드 "Hump Back"을 찾아주는데 ilike '%humpback%'는
-   * 공백 때문에 놓친다 — 같은 화면의 두 검색이 다른 답을 내면 고장으로 보인다.
-   */
-  const norm = q.toLowerCase().replace(/\s+/g, "");
-  const spaceless = (col: AnyPgColumn): SQL =>
-    sql`replace(lower(${col}), ' ', '') LIKE ${"%" + norm + "%"}`;
+  // 매칭 규칙은 공용 모듈(server/song-search.ts, SSOT)에서 — 은하 하단 검색창과
+  // 이 페이지가 같은 규칙을 써야 "여기선 나오는데 저기선 안 나오는" 검색이 안 된다
+  const norm = normalizeSearch(q);
+  const spaceless = (col: AnyPgColumn): SQL => spacelessLike(col, norm);
   if (q) {
     // 검색 대상 필터 — 제목만/가수만/전체(제목+가수)
     if (field === "title") {
@@ -86,8 +83,8 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
           ? (() => {
               // 순위 비교도 검색과 같은 공백-무시 정규화를 쓴다 — 다르면
               // "hump back" 검색에서 정확 일치인 Hump Back이 위로 못 올라온다
-              const nt = sql`replace(lower(${schema.songs.title}), ' ', '')`;
-              const na = sql`replace(lower(${schema.songs.artist}), ' ', '')`;
+              const nt = spacelessCol(schema.songs.title);
+              const na = spacelessCol(schema.songs.artist);
               const prefix = `${norm}%`;
               if (field === "artist") {
                 return [
