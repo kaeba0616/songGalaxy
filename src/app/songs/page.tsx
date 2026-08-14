@@ -204,6 +204,7 @@ export default async function SongsPage(props: { searchParams: Promise<SongsSear
               }`}
             >
               <Link
+                replace
                 href={`/songs/${song.id}`}
                 className="flex min-w-0 flex-1 items-center gap-4"
               >

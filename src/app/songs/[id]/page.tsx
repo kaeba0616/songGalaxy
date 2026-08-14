@@ -69,7 +69,12 @@ export default async function SongDetailPage(props: { params: Promise<{ id: stri
   return (
     <main className="min-h-dvh bg-[#05060f] px-5 py-8 text-white">
       <div className="mx-auto max-w-3xl">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex items-center justify-between gap-4">
+          {/* replace — 오버레이 안 이동은 히스토리를 쌓지 않는다. 곡 상세로 오는
+              링크들이 전부 replace라 뒤로가기로는 목록에 못 돌아간다 — 이 링크가 그 길이다 */}
+          <Link replace href="/songs" className="text-sm text-white/50 transition hover:text-white">
+            ← 곡 목록
+          </Link>
           <BackToGalaxyLink className="text-sm text-white/50 transition hover:text-white" />
           {/* ml-auto: 겹쳐 띄운 화면에서는 왼쪽의 "은하로 돌아가기"가 사라지는데,
               justify-between은 자식이 하나면 왼쪽에 붙이므로 이 버튼이 반대편으로 튄다 */}

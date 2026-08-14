@@ -147,7 +147,7 @@ export default async function MePage() {
           <ul className="divide-y divide-white/5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
             {likedSongs.map((song) => (
               <li key={song.id} className="flex items-center gap-4 px-4 py-3">
-                <Link href={`/songs/${song.id}`} className="flex min-w-0 flex-1 items-center gap-4">
+                <Link replace href={`/songs/${song.id}`} className="flex min-w-0 flex-1 items-center gap-4">
                   <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/5">
                     {song.artworkUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지

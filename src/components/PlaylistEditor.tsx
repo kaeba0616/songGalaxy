@@ -224,7 +224,7 @@ export default function PlaylistEditor({
               </button>
             )}
             <span className="w-6 shrink-0 text-xs text-white/30">{i + 1}</span>
-            <Link href={`/songs/${s.id}`} className="min-w-0 flex-1">
+            <Link replace href={`/songs/${s.id}`} className="min-w-0 flex-1">
               <span className="block truncate text-sm">{s.title}</span>
               <span className="block truncate text-xs text-white/45">{s.artist}</span>
             </Link>

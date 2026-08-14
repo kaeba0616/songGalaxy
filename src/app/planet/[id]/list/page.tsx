@@ -59,7 +59,7 @@ export default async function PlanetListPage(props: { params: Promise<{ id: stri
           {rows.map((song, i) => (
             <li key={song.id} className="flex items-center gap-3 px-4 py-3 transition hover:bg-white/5">
               <span className="w-6 shrink-0 text-right text-xs text-white/30">{i + 1}</span>
-              <Link href={`/songs/${song.id}`} className="flex min-w-0 flex-1 items-center gap-4">
+              <Link replace href={`/songs/${song.id}`} className="flex min-w-0 flex-1 items-center gap-4">
                 <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/5">
                   {song.artworkUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element -- 외부 CDN 이미지
