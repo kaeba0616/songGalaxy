@@ -575,17 +575,17 @@ export default function GalaxyCanvas({
    * (다른 페이지에서 돌아왔을 때 알약 대신 캐러셀로 보여주기 위함)
    * 진입당 한 번만 — 그러지 않으면 사용자가 ✕로 닫는 즉시 다시 열려버린다.
    *
-   * 단, **노래 목록 재생(mode: "playlist")은 카드로 옮기지 않는다**. 카드 캐러셀은
-   * 성단을 훑는 30초 미리듣기 UI이지 내 노래 목록을 보여주는 자리가 아니다 —
-   * 옮기면 은하를 열자마자 내 목록이 성단인 척 깔린다. 목록은 알약이 그대로 들고 있는다.
-   * (영상 무대는 이제 알약 바깥에 있으므로 카드를 띄워도 무너지지 않는다 — VideoStage)
+   * 노래 목록(mode: "playlist")도 캐러셀로 옮긴다 — 예전엔 "캐러셀은 성단 자리"라며
+   * 알약이 들고 있게 했는데, 그러면 행성에서 은하로 나올 때만 알약이 불쑥 떠서
+   * "은하에서는 캐러셀" 규칙이 화면마다 달라 보였다. 캐러셀은 표시·일시정지·넘김만
+   * 라이브 플레이어에 위임하므로 목록 재생(전곡 영상)이 격하되지 않는다.
    */
   const cardsRestored = useRef(false);
   useEffect(() => {
     if (status !== "ready" || cardsRestored.current) return;
     cardsRestored.current = true;
     const { queue: q, playingId: pid } = playingMirror.current;
-    if (!q || pid === null || q.mode === "playlist") return;
+    if (!q || pid === null) return;
     showCards(toCards(q));
   }, [status, toCards, showCards]);
 
@@ -1638,10 +1638,9 @@ export default function GalaxyCanvas({
         galaxySnapshot.current = null;
         if (snap) {
           void playerApiRef.current.restore(snap);
-          // 목록 재생은 카드로 옮기지 않는다 — 캐러셀은 성단을 훑는 자리이지
-          // 내 노래 목록의 자리가 아니다 (위 복원 이펙트와 같은 이유)
+          // 목록 재생도 카드로 — 안 옮기면 은하에서 알약이 불쑥 뜬다 (위 복원 이펙트와 같은 이유)
           const q = snap.queue;
-          showCards(q && q.mode !== "playlist" ? toCardsRef.current(q) : null);
+          showCards(q ? toCardsRef.current(q) : null);
         } else {
           playerApiRef.current.stop();
           showCards(null);
