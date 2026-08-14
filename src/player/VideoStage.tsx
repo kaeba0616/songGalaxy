@@ -37,8 +37,12 @@ export default function VideoStage() {
   const wrapRef = useRef<HTMLDivElement>(null);
   /**
    * 레일 전체 접힘 (sm 이상 전용). 화면 오른쪽 밖으로 밀어낼 뿐 언마운트하지
-   * 않는다 — iframe이 리마운트되면 재생이 처음부터 다시 시작된다. 그래서
-   * 접혀 있어도 소리는 계속 나온다("영상 접기"와 달리 재생을 멈추지 않는다).
+   * 않는다 — iframe이 리마운트되면 재생이 처음부터 다시 시작된다.
+   *
+   * **접으면 재생도 멈춘다 (YouTube 약관).** 플레이어를 숨긴 채 소리만 내는 것은
+   * 오디오만 분리한 경험이라 API 정책 위반이다 — "영상 접기 (재생이 멈춥니다)"가
+   * 멈추는 것과 같은 이유. 접기는 setVideoExpanded(false)를 함께 태워 일시정지하고,
+   * 펴면 기존 "영상 펼치고 이어 듣기" 흐름으로 이어 듣는다.
    */
   const [railHidden, setRailHidden] = useState(false);
 
@@ -102,9 +106,15 @@ export default function VideoStage() {
           레일이 화면 밖으로 밀려나도 이 탭만 남는다. 소리는 계속 나온다 */}
       <button
         type="button"
-        onClick={() => setRailHidden((v) => !v)}
-        aria-label={railHidden ? "재생 창 펼치기" : "재생 창 접기"}
-        title={railHidden ? "재생 창 펼치기" : "재생 창 접기"}
+        onClick={() => {
+          setRailHidden((v) => {
+            // 접는 순간 재생도 멈춘다 — 숨긴 플레이어로 소리만 내면 약관 위반
+            if (!v) setVideoExpanded(false);
+            return !v;
+          });
+        }}
+        aria-label={railHidden ? "재생 창 펼치기" : "재생 창 접기 (재생이 멈춥니다)"}
+        title={railHidden ? "재생 창 펼치기" : "재생 창 접기 (재생이 멈춥니다)"}
         className="absolute left-0 top-1/2 hidden h-16 w-6 -translate-x-full -translate-y-1/2 cursor-pointer place-items-center rounded-l-xl border border-r-0 border-white/15 bg-black/85 text-white/60 backdrop-blur transition hover:text-white sm:grid"
       >
         {railHidden ? "‹" : "›"}

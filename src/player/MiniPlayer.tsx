@@ -188,9 +188,12 @@ export default function MiniPlayer() {
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       style={pos ? { left: pos.x, top: pos.y, touchAction: "none" } : { touchAction: "none" }}
-      className={`fixed z-40 w-fit select-none ${pos ? "" : "inset-x-0 bottom-4 mx-auto"} ${
-        dragging ? "cursor-grabbing" : "cursor-grab"
-      }`}
+      /* 영상 레일(stageVideoId)이 서 있으면 sm 이상에서는 알약을 숨긴다 — 레일이
+         큐·컨트롤을 전담하는 자기 창이라 알약까지 있으면 컨트롤이 둘로 보인다.
+         폰(sm 미만)은 레일이 아니라 작은 카드뿐이라 알약이 계속 컨트롤을 맡는다 */
+      className={`fixed z-40 w-fit select-none ${stageVideoId !== null ? "sm:hidden" : ""} ${
+        pos ? "" : "inset-x-0 bottom-4 mx-auto"
+      } ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
     >
       {/* 재생 목록 — 바를 밀어내지 않도록 absolute로 위/아래에 띄운다.
           w-full = 바깥 래퍼(w-fit) 폭 = 알약 폭이라 둘의 너비가 항상 같다 */}
